@@ -134,27 +134,97 @@ class LockScreenOverlayService : AccessibilityService() {
     /** 根据「是否锁屏 + 是否亮屏 + 用户是否开启」决定显示还是隐藏 */
     private fun evaluate() {
         main.post {
-            val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
             val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-            val locked = km?.isKeyguardLocked == true
             val awake = pm?.isInteractive == true
             val enabled = Store.isOverlayEnabled(this)
+            val locked = isDeviceLocked()
             android.util.Log.i("LSW", "evaluate locked=$locked awake=$awake enabled=$enabled")
 
-            if (enabled && locked && awake) {
+            // 只在明确"已解锁且亮屏"时才隐藏；其余情况保持显示。
+            // 这样即使锁屏状态判断偶发失误，也不会出现"卡片消失"。
+            val definitelyUnlocked = !locked && awake && !isLikelyKeyguard()
+
+            if (enabled && awake && !definitelyUnlocked) {
                 runCatching { show() }
                     .onFailure { Store.setError(this, "show异常: ${it.javaClass.simpleName}") }
                 runCatching { reposition() }
                     .onFailure { android.util.Log.w("LSW", "reposition failed", it) }
-                // 兜底：如果该显示却没有窗口，重建一次
                 if (overlayView == null) {
                     runCatching { show() }
-                    Store.setError(this, "overlay为空，已尝试重建")
                 }
-            } else {
+            } else if (!enabled || !awake) {
                 hide()
             }
         }
+    }
+
+    /**
+     * 判断设备是否处于锁屏状态。
+     *
+     * 不能只用 KeyguardManager.isKeyguardLocked：在 HyperOS 3 上实测会出现
+     * 系统层 isKeyguardShowing=true 但该接口返回 false 的情况，
+     * 导致卡片该显示时不显示。
+     *
+     * 改为三源交叉，任一命中即视为锁屏：
+     *  1. KeyguardManager.isKeyguardLocked
+     *  2. 当前前台窗口是 NotificationShade / Keyguard（锁屏界面）
+     *  3. 无障碍窗口里出现锁屏特征（bouncer / keyguard 相关 id）
+     */
+    private fun isDeviceLocked(): Boolean {
+        // 源 1
+        val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        val viaKm = km?.isKeyguardLocked == true
+
+        // 源 2：当前活动窗口
+        var viaWindow = false
+        runCatching {
+            val root = rootInActiveWindow
+            val pkg = root?.packageName?.toString().orEmpty()
+            val id = root?.viewIdResourceName.orEmpty()
+            if (pkg.isNotEmpty()) {
+                viaWindow = pkg == "com.android.systemui" || pkg == "com.miui.aod"
+            }
+            if (!viaWindow && id.contains("keyguard", true)) viaWindow = true
+        }
+
+        // 源 3：屏幕上是否存在锁屏专属元素
+        var viaContent = false
+        runCatching {
+            val root = rootInActiveWindow
+            if (root != null) {
+                val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+                queue.add(root)
+                var guard = 0
+                while (queue.isNotEmpty() && guard++ < 120) {
+                    val n = queue.removeFirst()
+                    val id = n.viewIdResourceName.orEmpty()
+                    if (id.contains("keyguard", true) ||
+                        id.contains("bouncer", true) ||
+                        id.contains("lock_screen", true) ||
+                        id.endsWith("zen_title")
+                    ) {
+                        viaContent = true
+                        break
+                    }
+                    for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+                }
+            }
+        }
+
+        val locked = viaKm || viaWindow || viaContent
+        if (locked && !viaKm) {
+            android.util.Log.i("LSW", "锁屏判定修正: km=false window=$viaWindow content=$viaContent")
+        }
+        return locked
+    }
+
+    /** 当前前台是否像是锁屏界面（用于避免误隐藏） */
+    private fun isLikelyKeyguard(): Boolean {
+        return runCatching {
+            val root = rootInActiveWindow ?: return@runCatching false
+            val pkg = root.packageName?.toString().orEmpty()
+            pkg == "com.android.systemui" || pkg == "com.miui.aod"
+        }.getOrDefault(false)
     }
 
     private fun show() {
