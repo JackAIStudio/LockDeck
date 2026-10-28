@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  锁屏天气卡片
-  左半区 -> 打开天气    右半区 -> 打开闹钟
+  锁屏小组件卡片
+
+  ┌──────────────────────┬─────────┬─────────┐
+  │ ☁ 24°  阴·温州        │  微信   │  支付宝  │
+  │ 23°~30° · 02:28      │         │         │
+  └──────────────────────┴─────────┴─────────┘
+        天气区 ~44%          按钮1     按钮2
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -17,20 +22,21 @@
         android:orientation="horizontal"
         android:baselineAligned="false">
 
-        <!-- ============ 左半区：打开天气 ============ -->
+        <!-- ============ 天气区（点击打开天气） ============ -->
         <LinearLayout
-            android:id="@+id/ov_zone_left"
+            android:id="@+id/ov_zone_weather"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1.05"
+            android:layout_weight="1.45"
             android:orientation="vertical"
             android:gravity="center_vertical"
-            android:minHeight="92dp"
-            android:paddingStart="16dp"
+            android:minHeight="76dp"
+            android:paddingStart="15dp"
             android:paddingEnd="10dp"
-            android:paddingTop="12dp"
-            android:paddingBottom="12dp">
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp">
 
+            <!-- 第一行：图标 + 当前温度 + 天气描述 -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -42,37 +48,48 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="☀"
-                    android:textSize="24sp"
-                    android:paddingEnd="7dp" />
+                    android:textSize="20sp"
+                    android:paddingEnd="6dp" />
 
                 <TextView
                     android:id="@+id/ov_temp"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="--°"
-                    android:textSize="34sp"
+                    android:textSize="27sp"
                     android:textStyle="bold"
                     android:textColor="#FFFFFFFF"
                     android:includeFontPadding="false" />
+
+                <TextView
+                    android:id="@+id/ov_desc"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:text=""
+                    android:textSize="13sp"
+                    android:textColor="#D9FFFFFF" />
             </LinearLayout>
 
+            <!-- 第二行：最高最低 + 更新时间（合并，不重复） -->
             <TextView
-                android:id="@+id/ov_desc"
+                android:id="@+id/ov_range"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="1dp"
-                android:text="正在获取天气"
-                android:textSize="13sp"
-                android:textColor="#CCFFFFFF" />
+                android:layout_marginTop="2dp"
+                android:text=""
+                android:textSize="11sp"
+                android:textColor="#99FFFFFF" />
 
+            <!-- 降雨提示 -->
             <TextView
-                android:id="@+id/ov_hint"
+                android:id="@+id/ov_rain"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:text=""
                 android:textSize="10sp"
-                android:textColor="#80FFFFFF"
+                android:textColor="#FFD58A"
                 android:visibility="gone" />
         </LinearLayout>
 
@@ -80,51 +97,69 @@
         <View
             android:layout_width="1dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:layout_marginBottom="18dp"
-            android:background="#22FFFFFF" />
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"
+            android:background="#1FFFFFFF" />
 
-        <!-- ============ 右半区：打开闹钟 ============ -->
+        <!-- ============ 按钮 1：微信 ============ -->
         <LinearLayout
-            android:id="@+id/ov_zone_right"
+            android:id="@+id/ov_zone_app1"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="0.95"
+            android:layout_weight="1"
             android:orientation="vertical"
-            android:gravity="center_vertical"
-            android:minHeight="92dp"
-            android:paddingStart="14dp"
-            android:paddingEnd="16dp"
-            android:paddingTop="12dp"
-            android:paddingBottom="12dp">
+            android:gravity="center"
+            android:minHeight="76dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp">
 
             <TextView
-                android:id="@+id/ov_range"
+                android:id="@+id/ov_app1_icon"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="--° ~ --°"
-                android:textSize="21sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFFFF" />
+                android:text="💬"
+                android:textSize="19sp" />
 
             <TextView
+                android:id="@+id/ov_app1_name"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="1dp"
-                android:text="今日最高 / 最低"
-                android:textSize="11sp"
-                android:textColor="#B3FFFFFF" />
-
-            <!-- 降雨提示 -->
-            <TextView
-                android:id="@+id/ov_rain"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text=""
+                android:layout_marginTop="3dp"
+                android:text="微信"
                 android:textSize="10sp"
-                android:textColor="#FFD58A"
-                android:visibility="gone" />
+                android:textColor="#CCFFFFFF"
+                android:maxLines="1" />
+        </LinearLayout>
+
+        <!-- ============ 按钮 2：支付宝 ============ -->
+        <LinearLayout
+            android:id="@+id/ov_zone_app2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:minHeight="76dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="4dp"
+            android:paddingBottom="10dp">
+
+            <TextView
+                android:id="@+id/ov_app2_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="💳"
+                android:textSize="19sp" />
+
+            <TextView
+                android:id="@+id/ov_app2_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="支付宝"
+                android:textSize="10sp"
+                android:textColor="#CCFFFFFF"
+                android:maxLines="1" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

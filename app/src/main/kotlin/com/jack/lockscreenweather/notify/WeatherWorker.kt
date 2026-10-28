@@ -26,7 +26,10 @@ import java.util.concurrent.TimeUnit
 class WeatherWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
 
     override suspend fun doWork(): Result {
-        if (!Store.isEnabled(applicationContext)) return Result.success()
+        // 浮层模式或通知模式任一开启都要刷新（之前只判断 isEnabled，
+        // 导致用浮层时 Worker 每次直接返回，界面永远停在旧数据）
+        val needRefresh = Store.isOverlayEnabled(applicationContext) || Store.isEnabled(applicationContext)
+        if (!needRefresh) return Result.success()
 
         val fix = LocationHelper.lastKnown(applicationContext) ?: LocationHelper.FALLBACK
         val fetched = WeatherApi.fetch(fix.lat, fix.lon).getOrNull()
@@ -42,7 +45,13 @@ class WeatherWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
 
         val w = fetched.copy(city = city)
         Store.saveWeather(applicationContext, w)
+
+        // 通知模式：重发通知
         WeatherNotifier.show(applicationContext, w)
+
+        // 浮层模式：写 bump 让无障碍服务立刻重绘（不然要等下一次锁屏才更新）
+        Store.bumpOverlayRefresh(applicationContext)
+
         return Result.success()
     }
 

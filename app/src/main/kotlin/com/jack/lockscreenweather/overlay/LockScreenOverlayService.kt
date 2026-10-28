@@ -293,16 +293,28 @@ class LockScreenOverlayService : AccessibilityService() {
         val root = overlayView ?: return
         val w = Store.loadWeather(this)
 
-        root.findViewById<TextView>(R.id.ov_temp)?.text = w?.let { "${it.tempNow}°" } ?: "--°"
+        // ---- 第一行：图标 + 当前温度 + 天气 ----
         root.findViewById<TextView>(R.id.ov_icon)?.text = w?.icon ?: "…"
-        root.findViewById<TextView>(R.id.ov_range)?.text =
-            w?.let { "${it.tempMin}° ~ ${it.tempMax}°" } ?: "--° ~ --°"
+        root.findViewById<TextView>(R.id.ov_temp)?.text = w?.let { "${it.tempNow}°" } ?: "--°"
         root.findViewById<TextView>(R.id.ov_desc)?.text =
-            w?.let { wi ->
-                wi.description + if (wi.city.isNotBlank()) " · ${wi.city}" else ""
-            } ?: "正在获取天气"
+            w?.let { it.description } ?: "获取中"
 
-        // 降雨提示
+        // ---- 第二行：最高最低 + 城市 + 更新时间（合并成一行，不重复） ----
+        val rangeView = root.findViewById<TextView>(R.id.ov_range)
+        if (rangeView != null) {
+            rangeView.text = if (w == null) {
+                "正在获取天气"
+            } else {
+                val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                val parts = mutableListOf<String>()
+                parts.add("${w.tempMin}°~${w.tempMax}°")
+                if (w.city.isNotBlank()) parts.add(w.city)
+                parts.add(fmt.format(java.util.Date(w.updatedAt)))
+                parts.joinToString(" · ")
+            }
+        }
+
+        // ---- 降雨提示 ----
         val rainView = root.findViewById<TextView>(R.id.ov_rain)
         val hint = w?.takeIf { Store.isRainHintEnabled(this) }?.umbrellaHint
         if (rainView != null) {
@@ -314,13 +326,37 @@ class LockScreenOverlayService : AccessibilityService() {
             }
         }
 
-        // 更新时间戳（小字，在左下）
-        val hintView = root.findViewById<TextView>(R.id.ov_hint)
-        if (hintView != null && w != null) {
-            val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-            hintView.text = "更新 " + fmt.format(java.util.Date(w.updatedAt))
-            hintView.visibility = View.VISIBLE
+        // ---- 两个快捷按钮：显示目标 App 的名字 ----
+        bindAppButton(root, R.id.ov_app1_name, R.id.ov_app1_icon, "app1", DEFAULT_APP1, "💬")
+        bindAppButton(root, R.id.ov_app2_name, R.id.ov_app2_icon, "app2", DEFAULT_APP2, "💳")
+    }
+
+    /** 把一个按钮的文案换成目标 App 的实际名字 */
+    private fun bindAppButton(
+        root: View,
+        nameId: Int,
+        iconId: Int,
+        zone: String,
+        fallback: String,
+        fallbackIcon: String,
+    ) {
+        val pkg = Store.getTarget(this, zone) ?: fallback
+        val label = runCatching {
+            val ai = packageManager.getApplicationInfo(pkg, 0)
+            packageManager.getApplicationLabel(ai).toString()
+        }.getOrNull() ?: "—"
+
+        root.findViewById<TextView>(nameId)?.text = label
+
+        // 已知 App 给个近似的图标；其他用通用图标
+        val icon = when (pkg) {
+            "com.tencent.mm" -> "💬"
+            "com.eg.android.AlipayGphone" -> "💳"
+            "com.android.deskclock" -> "⏰"
+            "com.miui.weather2" -> "☀"
+            else -> fallbackIcon
         }
+        root.findViewById<TextView>(iconId)?.text = icon
     }
 
     /** 长按卡片进入拖动模式，松手后记住位置 */
@@ -370,20 +406,32 @@ class LockScreenOverlayService : AccessibilityService() {
      * 左：用户配置的 main（默认小米天气）
      * 右：用户配置的 right（默认闹钟）
      */
+    /**
+     * 三个点击区：
+     *   天气区   -> 天气 App
+     *   按钮1    -> 默认微信
+     *   按钮2    -> 默认支付宝
+     * 三者的目标都可以在 App 里改。
+     */
     private fun bindClick(v: View) {
-        v.findViewById<View>(R.id.ov_zone_left)?.setOnClickListener {
-            android.util.Log.i("LSW", "tap LEFT")
+        v.findViewById<View>(R.id.ov_zone_weather)?.setOnClickListener {
+            android.util.Log.i("LSW", "tap WEATHER")
             launch(Store.getTarget(this, "main"), WEATHER_PKG)
         }
-        v.findViewById<View>(R.id.ov_zone_right)?.setOnClickListener {
-            android.util.Log.i("LSW", "tap RIGHT")
-            launch(Store.getTarget(this, "right"), CLOCK_PKG)
+        v.findViewById<View>(R.id.ov_zone_app1)?.setOnClickListener {
+            android.util.Log.i("LSW", "tap APP1")
+            launch(Store.getTarget(this, "app1"), DEFAULT_APP1)
+        }
+        v.findViewById<View>(R.id.ov_zone_app2)?.setOnClickListener {
+            android.util.Log.i("LSW", "tap APP2")
+            launch(Store.getTarget(this, "app2"), DEFAULT_APP2)
         }
     }
 
     private companion object {
         const val WEATHER_PKG = "com.miui.weather2"
-        const val CLOCK_PKG = "com.android.deskclock"
+        const val DEFAULT_APP1 = "com.tencent.mm"          // 微信
+        const val DEFAULT_APP2 = "com.eg.android.AlipayGphone" // 支付宝
     }
 
     /**

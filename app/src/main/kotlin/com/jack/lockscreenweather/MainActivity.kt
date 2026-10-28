@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
                                 .padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            Text("锁屏天气", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                            Text("Lock screen widget", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                             Text(
                                 "在锁屏的通知区域常驻显示当前温度与今日最高/最低。",
                                 fontSize = 13.sp,
@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("锁屏天气卡片", fontWeight = FontWeight.Medium)
+                                        Text("锁屏小组件", fontWeight = FontWeight.Medium)
                                         Text(
                                             when {
                                                 !enabled -> "未开启"
@@ -281,8 +281,8 @@ class MainActivity : ComponentActivity() {
 
                             Text("点击区域绑定", fontWeight = FontWeight.Medium)
                             TargetRow(
-                                title = "主区域（温度）",
-                                desc = "点温度 -> 打开",
+                                title = "天气区",
+                                desc = "点天气 -> 打开",
                                 current = Store.getTarget(ctx, "main") ?: WeatherNotifier.WEATHER,
                                 onPick = {
                                     ctx.startActivity(
@@ -291,18 +291,22 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                             TargetRow(
-                                title = "左下区域（今日温度）",
-                                desc = "固定为刷新，锁屏下无需解锁",
-                                current = "__refresh__",
-                                onPick = null,
-                            )
-                            TargetRow(
-                                title = "右下区域（箭头）",
-                                desc = "点这里 -> 打开",
-                                current = Store.getTarget(ctx, "right") ?: WeatherNotifier.CLOCK,
+                                title = "快捷按钮 1",
+                                desc = "点这里 -> 打开（默认微信）",
+                                current = Store.getTarget(ctx, "app1") ?: "com.tencent.mm",
                                 onPick = {
                                     ctx.startActivity(
-                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "right")
+                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "app1")
+                                    )
+                                },
+                            )
+                            TargetRow(
+                                title = "快捷按钮 2",
+                                desc = "点这里 -> 打开（默认支付宝）",
+                                current = Store.getTarget(ctx, "app2") ?: "com.eg.android.AlipayGphone",
+                                onPick = {
+                                    ctx.startActivity(
+                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "app2")
                                     )
                                 },
                             )
