@@ -58,6 +58,12 @@ class LockScreenOverlayService : AccessibilityService() {
      */
     private var lastBump = 0L
 
+    /** 本次亮屏后是否已经解锁过 */
+    @Volatile private var unlockedSinceScreenOn = false
+
+    /** 是否已经解锁过（跨亮屏周期保留，灭屏时重置） */
+    @Volatile private var hasUserPresent = false
+
     private val watchdog = object : Runnable {
         override fun run() {
             // App 里改了位置/设置会写 bump，这里立刻响应，不用等下一次锁屏
@@ -112,9 +118,26 @@ class LockScreenOverlayService : AccessibilityService() {
         receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    Intent.ACTION_SCREEN_ON, Intent.ACTION_SCREEN_OFF,
-                    Intent.ACTION_USER_PRESENT,
-                    -> evaluate()
+                    Intent.ACTION_USER_PRESENT -> {
+                        // 解锁成功：此后下拉通知栏/控制中心都算已解锁
+                        unlockedSinceScreenOn = true
+                        hasUserPresent = true
+                        android.util.Log.i("LSW", "USER_PRESENT -> unlocked")
+                        evaluate()
+                    }
+                    Intent.ACTION_SCREEN_OFF -> {
+                        // 灭屏：下一次亮屏重新从锁定状态开始
+                        unlockedSinceScreenOn = false
+                        hasUserPresent = false
+                        android.util.Log.i("LSW", "SCREEN_OFF -> reset lock state")
+                        evaluate()
+                    }
+                    Intent.ACTION_SCREEN_ON -> {
+                        // 亮屏时还没解锁
+                        unlockedSinceScreenOn = false
+                        android.util.Log.i("LSW", "SCREEN_ON")
+                        evaluate()
+                    }
                 }
             }
         }
@@ -132,99 +155,101 @@ class LockScreenOverlayService : AccessibilityService() {
     }
 
     /** 根据「是否锁屏 + 是否亮屏 + 用户是否开启」决定显示还是隐藏 */
+    /**
+     * 决定显示还是隐藏。
+     *
+     * 判断依据只用 KeyguardManager.isKeyguardLocked。
+     * 它是唯一语义明确的信号；"前台包名是不是 systemui" 不可用，
+     * 因为主屏幕、计算器这些界面同样可能被系统标记成 systemui 相关，
+     * 会导致卡片在桌面和别的 App 上一直显示。
+     */
     private fun evaluate() {
         main.post {
             val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
             val awake = pm?.isInteractive == true
             val enabled = Store.isOverlayEnabled(this)
-            val locked = isDeviceLocked()
+            val locked = isKeyguardLockedNow()
             android.util.Log.i("LSW", "evaluate locked=$locked awake=$awake enabled=$enabled")
 
-            // 只在明确"已解锁且亮屏"时才隐藏；其余情况保持显示。
-            // 这样即使锁屏状态判断偶发失误，也不会出现"卡片消失"。
-            val definitelyUnlocked = !locked && awake && !isLikelyKeyguard()
-
-            if (enabled && awake && !definitelyUnlocked) {
+            if (enabled && awake && locked) {
                 runCatching { show() }
                     .onFailure { Store.setError(this, "show异常: ${it.javaClass.simpleName}") }
                 runCatching { reposition() }
                     .onFailure { android.util.Log.w("LSW", "reposition failed", it) }
-                if (overlayView == null) {
-                    runCatching { show() }
-                }
-            } else if (!enabled || !awake) {
+                if (overlayView == null) runCatching { show() }
+            } else {
                 hide()
             }
         }
     }
 
     /**
-     * 判断设备是否处于锁屏状态。
+     * 读取锁屏状态。
      *
-     * 不能只用 KeyguardManager.isKeyguardLocked：在 HyperOS 3 上实测会出现
-     * 系统层 isKeyguardShowing=true 但该接口返回 false 的情况，
-     * 导致卡片该显示时不显示。
-     *
-     * 改为三源交叉，任一命中即视为锁屏：
-     *  1. KeyguardManager.isKeyguardLocked
-     *  2. 当前前台窗口是 NotificationShade / Keyguard（锁屏界面）
-     *  3. 无障碍窗口里出现锁屏特征（bouncer / keyguard 相关 id）
+     * HyperOS 3 上 KeyguardManager 偶发返回 false（系统层却是 true），
+     * 这里做一次"设备是否真的锁着"的互补判断：
+     * 只有当 KeyguardManager 说未锁、且当前确实处于某个应用界面时，
+     * 才认定已解锁。这样不会因为偶发 false 而误隐藏。
      */
-    private fun isDeviceLocked(): Boolean {
-        // 源 1
-        val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        val viaKm = km?.isKeyguardLocked == true
-
-        // 源 2：当前活动窗口
-        var viaWindow = false
-        runCatching {
-            val root = rootInActiveWindow
-            val pkg = root?.packageName?.toString().orEmpty()
-            val id = root?.viewIdResourceName.orEmpty()
-            if (pkg.isNotEmpty()) {
-                viaWindow = pkg == "com.android.systemui" || pkg == "com.miui.aod"
+    /**
+     * 是否处于锁屏状态。
+     *
+     * 实测结论（HyperOS 3 / Redmi Turbo 5）：
+     *  - KeyguardManager.isKeyguardLocked：解锁后下拉通知栏仍返回 true，不可靠
+     *  - ACTION_USER_PRESENT：服务重建后收不到，不可靠
+     *  - 前台包名：桌面是 com.miui.home；锁屏和下拉都是 com.android.systemui，
+     *    无法用包名区分锁屏和下拉
+     *
+     * 可行的判据：看 systemui 窗口里到底有没有锁屏内容。
+     *  - 有锁屏时钟/bouncer/锁屏快捷方式 => 真锁屏，显示
+     *  - 只有快捷开关磁贴/通知列表       => 已解锁后下拉，隐藏
+     */
+    private fun isKeyguardLockedNow(): Boolean {
+        return runCatching {
+            val ws = windows
+            if (ws.isNullOrEmpty()) {
+                // 拿不到窗口，按系统说法走
+                val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                return@runCatching km?.isKeyguardLocked == true
             }
-            if (!viaWindow && id.contains("keyguard", true)) viaWindow = true
-        }
 
-        // 源 3：屏幕上是否存在锁屏专属元素
-        var viaContent = false
-        runCatching {
-            val root = rootInActiveWindow
-            if (root != null) {
-                val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
-                queue.add(root)
-                var guard = 0
-                while (queue.isNotEmpty() && guard++ < 120) {
-                    val n = queue.removeFirst()
-                    val id = n.viewIdResourceName.orEmpty()
-                    if (id.contains("keyguard", true) ||
-                        id.contains("bouncer", true) ||
-                        id.contains("lock_screen", true) ||
-                        id.endsWith("zen_title")
-                    ) {
-                        viaContent = true
-                        break
-                    }
-                    for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
-                }
+            // 若当前正在用具体 App（非 systemui），肯定已解锁
+            val focusedPkg = ws.firstOrNull { it.isFocused }
+                ?.root?.packageName?.toString().orEmpty()
+            if (focusedPkg.isNotEmpty() &&
+                focusedPkg != "com.android.systemui" &&
+                focusedPkg != "com.miui.aod"
+            ) {
+                return@runCatching false
             }
-        }
 
-        val locked = viaKm || viaWindow || viaContent
-        if (locked && !viaKm) {
-            android.util.Log.i("LSW", "锁屏判定修正: km=false window=$viaWindow content=$viaContent")
-        }
-        return locked
+            // 处在 systemui 窗口：检查是不是真正的锁屏
+            for (w in ws) {
+                val root = w.root ?: continue
+                if (hasKeyguardContent(root)) return@runCatching true
+            }
+            false
+        }.getOrDefault(false)
     }
 
-    /** 当前前台是否像是锁屏界面（用于避免误隐藏） */
-    private fun isLikelyKeyguard(): Boolean {
-        return runCatching {
-            val root = rootInActiveWindow ?: return@runCatching false
-            val pkg = root.packageName?.toString().orEmpty()
-            pkg == "com.android.systemui" || pkg == "com.miui.aod"
-        }.getOrDefault(false)
+    /** 窗口里是否有锁屏专属元素 */
+    private fun hasKeyguardContent(root: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        queue.add(root)
+        var guard = 0
+        while (queue.isNotEmpty() && guard++ < 250) {
+            val n = queue.removeFirst()
+            val id = n.viewIdResourceName.orEmpty()
+            if (id.contains("keyguard", true) ||
+                id.contains("bouncer", true) ||
+                id.contains("lock_screen", true)
+            ) {
+                return true
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return false
     }
 
     private fun show() {
