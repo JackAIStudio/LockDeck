@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">锁屏天气</string>
+    <string name="a11y_desc">在锁屏上显示天气卡片。需要无障碍权限，仅用于把卡片绘制到锁屏之上，不会读取或记录您的任何输入内容。</string>
+</resources>
