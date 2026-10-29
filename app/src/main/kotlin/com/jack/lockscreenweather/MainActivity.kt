@@ -57,6 +57,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // App 一起来就把常驻通知挂上（这是用户真正要的"通知栏一行"），
+        // 不依赖用户去点刷新按钮。
+        runCatching {
+            if (com.jack.lockscreenweather.data.Store.isEnabled(this)) {
+                com.jack.lockscreenweather.notify.WeatherForegroundService
+                    .refresh(this, com.jack.lockscreenweather.data.Store.loadWeather(this))
+            }
+        }
         setContent {
             LockScreenWeatherTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

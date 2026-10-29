@@ -46,7 +46,7 @@ class WeatherWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val w = fetched.copy(city = city)
         Store.saveWeather(applicationContext, w)
 
-        // 通知模式：重发通知
+        // 通知模式：重发常驻通知（内部走前台服务那条，只发一条）
         WeatherNotifier.show(applicationContext, w)
 
         // 浮层模式：写 bump 让无障碍服务立刻重绘（不然要等下一次锁屏才更新）

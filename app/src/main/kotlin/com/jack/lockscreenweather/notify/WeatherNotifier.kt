@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.jack.lockscreenweather.R
@@ -63,62 +62,63 @@ object WeatherNotifier {
      */
     fun build(ctx: Context, w: Weather?): Notification {
         ensureChannel(ctx)
+        return buildOnChannel(ctx, CHANNEL_ID, ongoing = true, silent = true, w = w)
+    }
 
-        val views = RemoteViews(ctx.packageName, R.layout.notif_weather).apply {
+    /**
+     * 用指定 channel 构建通知。
+     *
+     * 前台服务通知必须与 startForeground 传入的 Notification 保持一致的 channel，
+     * 否则 Android 会直接抛异常。
+     */
+    fun buildOnChannel(
+        ctx: Context,
+        channelId: String,
+        ongoing: Boolean,
+        silent: Boolean,
+        w: Weather? = Store.loadWeather(ctx),
+    ): Notification {
+        val title = w?.let { "${it.tempNow}° ${it.description}" } ?: "正在获取天气"
+        val detail = buildString {
             if (w != null) {
-                setTextViewText(R.id.tv_temp, "${w.tempNow}°")
-                setTextViewText(R.id.tv_icon, w.icon)
-                setTextViewText(R.id.tv_range, "今日 ${w.tempMin}° ~ ${w.tempMax}°")
-                setTextViewText(R.id.tv_desc, buildString {
-                    append(w.description)
-                    if (w.city.isNotBlank()) append(" · ").append(w.city)
-                })
+                append("今日 ${w.tempMin}° ~ ${w.tempMax}°")
+                if (w.rainChance >= 0) append(" · 降雨 ${w.rainChance}%")
+                if (w.city.isNotBlank()) append(" · ").append(w.city)
             } else {
-                setTextViewText(R.id.tv_temp, "--°")
-                setTextViewText(R.id.tv_icon, "…")
-                setTextViewText(R.id.tv_range, "今日 --° ~ --°")
-                setTextViewText(R.id.tv_desc, "正在获取天气")
+                append("点开可手动刷新")
             }
-
-            // ---- 三个独立点击区 ----
-            // 主区域：打开用户指定的 App（默认天气 App）
-            setOnClickPendingIntent(
-                R.id.zone_main,
-                targetPendingIntent(ctx, Store.getTarget(ctx, "main") ?: WEATHER, RC_MAIN),
-            )
-            // 左侧：刷新（不经解锁，直接广播触发后台刷新）
-            setOnClickPendingIntent(R.id.zone_left, refreshPendingIntent(ctx, RC_REFRESH))
-            // 右侧：用户指定的 App（默认闹钟）
-            setOnClickPendingIntent(
-                R.id.zone_right,
-                targetPendingIntent(ctx, Store.getTarget(ctx, "right") ?: CLOCK, RC_RIGHT),
-            )
         }
 
         val contentIntent = targetPendingIntent(ctx, Store.getTarget(ctx, "main") ?: WEATHER, RC_MAIN)
 
-        return NotificationCompat.Builder(ctx, CHANNEL_ID)
+        // 关键：不要用 RemoteViews / setCustomContentView。
+        // MIUI 把「自定义布局、系统读不出文案」的通知判为低价值，会折叠进"更多通知"。
+        // JackVoiceIME 的录音通知用的就是系统原生 BigTextStyle，实测能稳定置顶。
+        return NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(R.drawable.ic_stat_weather)
-            .setCustomContentView(views)
-            // 展开态也用同一套布局，避免用户下拉时看到空壳
-            .setCustomBigContentView(views)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-            .setOngoing(true)            // 常驻，划不掉
+            .setContentTitle(title)
+            .setContentText(detail)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+            .setOngoing(ongoing)         // 常驻，划不掉
             .setOnlyAlertOnce(true)      // 刷新时不重复打扰
-            .setSilent(true)             // 静音：不响不震，即使通道是 DEFAULT
+            .setSilent(silent)
             .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // 锁屏显示全文
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(contentIntent)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .addAction(
+                R.drawable.ic_stat_weather,
+                "刷新",
+                refreshPendingIntent(ctx, RC_REFRESH),
+            )
             .build()
     }
 
     fun show(ctx: Context, w: Weather?) {
         if (!Store.isEnabled(ctx)) return
-        runCatching {
-            NotificationManagerCompat.from(ctx).notify(NOTIF_ID, build(ctx, w))
-        }
+        // 只保留一条：统一走前台服务那条（id=1002）。
+        // 以前这里会再发一条 id=1001，导致通知栏出现两条一模一样的天气。
+        WeatherForegroundService.refresh(ctx, w)
     }
 
     fun cancel(ctx: Context) {

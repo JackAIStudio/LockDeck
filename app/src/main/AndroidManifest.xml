@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Android 11+ 需要显式声明要查询的包，否则 getLaunchIntentForPackage 返回 null -->
     <queries>
@@ -56,6 +58,16 @@
         <receiver
             android:name=".notify.RefreshReceiver"
             android:exported="false" />
+
+        <!-- 常驻前台服务：只为拿到 FOREGROUND_SERVICE 通知，让它能上锁屏 -->
+        <service
+            android:name=".notify.WeatherForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="在锁屏常驻显示天气信息" />
+        </service>
 
         <!-- 锁屏浮层：TYPE_ACCESSIBILITY_OVERLAY 允许覆盖锁屏 -->
         <service
