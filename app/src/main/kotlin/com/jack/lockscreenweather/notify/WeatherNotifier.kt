@@ -16,12 +16,13 @@ import com.jack.lockscreenweather.data.Weather
 import com.jack.lockscreenweather.data.WeatherApi
 
 /**
- * 锁屏天气卡片。
+ * 通知栏天气卡片。
  *
- * 设计要点（都是为了验证可行性）：
- * 1. 用 RemoteViews 自定义布局 —— 验证小米会不会把它降级成系统模板
- * 2. 三个独立点击区，各自一个 PendingIntent —— 验证多点位是否互不干扰
- * 3. PendingIntent 必须 requestCode 唯一 + FLAG_IMMUTABLE，否则会互相覆盖
+ * 设计要点：
+ * 1. 只用系统原生布局（BigTextStyle）。RemoteViews 自定义布局会被 MIUI 折叠，
+ *    详见 buildOnChannel() 里的实测记录。
+ * 2. 两个 App 快捷按钮各绑一个 PendingIntent。
+ * 3. PendingIntent 必须 requestCode 唯一 + FLAG_IMMUTABLE，否则会互相覆盖。
  */
 object WeatherNotifier {
 
@@ -34,6 +35,9 @@ object WeatherNotifier {
     private const val RC_LEFT = 101
     private const val RC_RIGHT = 102
     private const val RC_REFRESH = 103
+    private const val RC_APP1 = 104
+    private const val RC_APP2 = 105
+    private const val RC_REPOST = 106
 
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -91,9 +95,20 @@ object WeatherNotifier {
 
         val contentIntent = targetPendingIntent(ctx, Store.getTarget(ctx, "main") ?: WEATHER, RC_MAIN)
 
-        // 关键：不要用 RemoteViews / setCustomContentView。
-        // MIUI 把「自定义布局、系统读不出文案」的通知判为低价值，会折叠进"更多通知"。
-        // JackVoiceIME 的录音通知用的就是系统原生 BigTextStyle，实测能稳定置顶。
+        // 按钮 1 / 按钮 2 —— 各自打开不同 App，用户可在 App 里改
+        val app1Pkg = Store.getTarget(ctx, "app1") ?: "com.tencent.mm"
+        val app2Pkg = Store.getTarget(ctx, "app2") ?: "com.eg.android.AlipayGphone"
+        val app1Label = labelOf(ctx, app1Pkg, "微信")
+        val app2Label = labelOf(ctx, app2Pkg, "支付宝")
+
+        // 只用系统原生布局。
+        //
+        // 实测结论（HyperOS 3 / Redmi Turbo 5）：
+        //   - 系统原生 BigTextStyle  → 稳定置顶，从不折叠；副作用是 action 按钮要点「长按」才出
+        //   - 任意 RemoteViews 自定义 → 一律折叠进「更多通知」，连天气本身都看不见
+        //                              （试过补 setContentTitle/Text 试图救回来，无效；
+        //                                也试过自定义布局 + addAction，照样折叠）
+        // 两者不可兼得。选了"天气一定看得见"，按钮就让用户长按调出。
         return NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(R.drawable.ic_stat_weather)
             .setContentTitle(title)
@@ -106,13 +121,27 @@ object WeatherNotifier {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(contentIntent)
+            // 被左滑划掉时立刻重发，做到「划掉也会自己回来」（对齐 Clash Meta 的手感）
+            .setDeleteIntent(repostPendingIntent(ctx))
             .addAction(
                 R.drawable.ic_stat_weather,
-                "刷新",
-                refreshPendingIntent(ctx, RC_REFRESH),
+                app1Label,
+                targetPendingIntent(ctx, app1Pkg, RC_APP1),
+            )
+            .addAction(
+                R.drawable.ic_stat_weather,
+                app2Label,
+                targetPendingIntent(ctx, app2Pkg, RC_APP2),
             )
             .build()
     }
+
+    /** 取 App 显示名，拿不到就用兜底文案 */
+    private fun labelOf(ctx: Context, pkg: String, fallback: String): String =
+        runCatching {
+            val ai = ctx.packageManager.getApplicationInfo(pkg, 0)
+            ctx.packageManager.getApplicationLabel(ai).toString()
+        }.getOrNull() ?: fallback
 
     fun show(ctx: Context, w: Weather?) {
         if (!Store.isEnabled(ctx)) return
@@ -146,6 +175,23 @@ object WeatherNotifier {
         }
         return PendingIntent.getBroadcast(
             ctx, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /**
+     * 通知被左滑划掉后，立刻把常驻通知重新挂上去。
+     *
+     * 为什么需要：OnGoing 只是不让用户「点 X」，左滑在 MIUI 上仍然能划掉。
+     * Clash Meta 那种「划掉马上回来」的手感，就是因为它每秒都在重发通知；
+     * 我们 10 分钟才更新一次，只能靠 deleteIntent 主动补发。
+     */
+    private fun repostPendingIntent(ctx: Context): PendingIntent {
+        val intent = Intent(ctx, RefreshReceiver::class.java).apply {
+            action = RefreshReceiver.ACTION_REPOST
+        }
+        return PendingIntent.getBroadcast(
+            ctx, RC_REPOST, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
