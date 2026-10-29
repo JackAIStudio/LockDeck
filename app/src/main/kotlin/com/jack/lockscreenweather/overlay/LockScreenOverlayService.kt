@@ -64,19 +64,31 @@ class LockScreenOverlayService : AccessibilityService() {
     /** 是否已经解锁过（跨亮屏周期保留，灭屏时重置） */
     @Volatile private var hasUserPresent = false
 
+    /** 最近一次 evaluate 的时间，用于判断轮询是否还活着 */
+    @Volatile private var lastHeartbeat = 0L
+
     private val watchdog = object : Runnable {
         override fun run() {
-            // App 里改了位置/设置会写 bump，这里立刻响应，不用等下一次锁屏
-            val bump = Store.getOverlayBump(this@LockScreenOverlayService)
-            if (bump != lastBump) {
-                lastBump = bump
-                if (overlayView != null) {
-                    runCatching { reposition(force = true) }
-                    runCatching { updateContent() }
+            // 整个循环包在 try/catch 里，任何异常都不能让轮询断掉。
+            // 之前 evaluate() 抛异常会把 postDelayed 一起跳过，轮询就永久停止，
+            // 表现就是"卡片突然消失，必须重开 App 才恢复"。
+            try {
+                val bump = Store.getOverlayBump(this@LockScreenOverlayService)
+                if (bump != lastBump) {
+                    lastBump = bump
+                    if (overlayView != null) {
+                        runCatching { reposition(force = true) }
+                        runCatching { updateContent() }
+                    }
                 }
+                evaluate()
+            } catch (t: Throwable) {
+                android.util.Log.e("LSW", "watchdog 异常，异常已吞掉继续轮询", t)
+            } finally {
+                // 无论如何都要排下一次
+                main.removeCallbacks(this)
+                main.postDelayed(this, 1500)
             }
-            evaluate()
-            main.postDelayed(this, 1500)
         }
     }
     private fun startWatchdog() {
@@ -165,6 +177,8 @@ class LockScreenOverlayService : AccessibilityService() {
      */
     private fun evaluate() {
         main.post {
+          lastHeartbeat = System.currentTimeMillis()
+          runCatching {
             val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
             val awake = pm?.isInteractive == true
             val enabled = Store.isOverlayEnabled(this)
@@ -180,6 +194,9 @@ class LockScreenOverlayService : AccessibilityService() {
             } else {
                 hide()
             }
+          }.onFailure {
+              android.util.Log.e("LSW", "evaluate 异常", it)
+          }
         }
     }
 
