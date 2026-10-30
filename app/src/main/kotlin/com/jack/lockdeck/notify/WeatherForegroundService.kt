@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.notify
+package com.jack.lockdeck.notify
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -9,7 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import com.jack.lockscreenweather.data.Store
+import com.jack.lockdeck.data.Store
 
 /**
  * 常驻前台服务，只为了拿到 FOREGROUND_SERVICE 类型的通知。
@@ -91,7 +91,7 @@ class WeatherForegroundService : Service() {
             runCatching { ctx.stopService(Intent(ctx, WeatherForegroundService::class.java)) }
         }
 
-        fun refresh(ctx: Context, w: com.jack.lockscreenweather.data.Weather?) {
+        fun refresh(ctx: Context, w: com.jack.lockdeck.data.Weather?) {
             if (!Store.isEnabled(ctx)) return
             // 渠道必须先建好，否则 notify 会报 "No Channel found" 静默失败
             ensureChannel(ctx)

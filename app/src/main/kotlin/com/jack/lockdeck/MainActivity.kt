@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather
+package com.jack.lockdeck
 
 import android.Manifest
 import android.content.Intent
@@ -40,12 +40,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
-import com.jack.lockscreenweather.action.QuickAction
-import com.jack.lockscreenweather.data.LocationHelper
-import com.jack.lockscreenweather.data.Store
-import com.jack.lockscreenweather.notify.WeatherNotifier
-import com.jack.lockscreenweather.notify.WeatherWorker
-import com.jack.lockscreenweather.ui.theme.LockScreenWeatherTheme
+import com.jack.lockdeck.action.QuickAction
+import com.jack.lockdeck.data.LocationHelper
+import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.notify.WeatherNotifier
+import com.jack.lockdeck.notify.WeatherWorker
+import com.jack.lockdeck.ui.theme.LockDeckTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -61,13 +61,13 @@ class MainActivity : ComponentActivity() {
         // App 一起来就把常驻通知挂上（这是用户真正要的"通知栏一行"），
         // 不依赖用户去点刷新按钮。
         runCatching {
-            if (com.jack.lockscreenweather.data.Store.isEnabled(this)) {
-                com.jack.lockscreenweather.notify.WeatherForegroundService
-                    .refresh(this, com.jack.lockscreenweather.data.Store.loadWeather(this))
+            if (com.jack.lockdeck.data.Store.isEnabled(this)) {
+                com.jack.lockdeck.notify.WeatherForegroundService
+                    .refresh(this, com.jack.lockdeck.data.Store.loadWeather(this))
             }
         }
         setContent {
-            LockScreenWeatherTheme {
+            LockDeckTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val ctx = LocalContext.current
                     var enabled by remember { mutableStateOf(Store.isOverlayEnabled(ctx)) }
@@ -389,7 +389,7 @@ class MainActivity : ComponentActivity() {
                                         sbm?.requestAddTileService(
                                             android.content.ComponentName(
                                                 ctx,
-                                                com.jack.lockscreenweather.tile.Tile1Service::class.java,
+                                                com.jack.lockdeck.tile.Tile1Service::class.java,
                                             ),
                                             "磁贴 1",
                                             android.graphics.drawable.Icon.createWithResource(

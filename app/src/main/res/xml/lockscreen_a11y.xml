@@ -6,4 +6,4 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/a11y_desc"
     android:notificationTimeout="100"
-    android:settingsActivity="com.jack.lockscreenweather.MainActivity" />
+    android:settingsActivity="com.jack.lockdeck.MainActivity" />

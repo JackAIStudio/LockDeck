@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.jack.lockscreenweather.ui.theme
+package com.jack.lockdeck.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

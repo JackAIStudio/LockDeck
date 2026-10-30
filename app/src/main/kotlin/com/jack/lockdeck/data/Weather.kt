@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.data
+package com.jack.lockdeck.data
 
 /** 一条天气快照。字段全部来自 Open-Meteo 当前+当日预报。 */
 data class Weather(

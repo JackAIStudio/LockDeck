@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.notify
+package com.jack.lockdeck.notify
 
 import android.content.Context
 import androidx.work.Constraints
@@ -10,9 +10,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.jack.lockscreenweather.data.LocationHelper
-import com.jack.lockscreenweather.data.Store
-import com.jack.lockscreenweather.data.WeatherApi
+import com.jack.lockdeck.data.LocationHelper
+import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.data.WeatherApi
 import java.util.concurrent.TimeUnit
 
 /**
@@ -60,7 +60,7 @@ class WeatherWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         private const val ONCE = "lsw_once"
 
         fun schedule(ctx: Context) {
-            val minutes = com.jack.lockscreenweather.data.Store.getRefreshMinutes(ctx).toLong()
+            val minutes = com.jack.lockdeck.data.Store.getRefreshMinutes(ctx).toLong()
             val req = PeriodicWorkRequestBuilder<WeatherWorker>(minutes, TimeUnit.MINUTES)
                 .setConstraints(
                     Constraints.Builder()

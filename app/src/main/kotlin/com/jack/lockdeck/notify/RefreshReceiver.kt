@@ -1,19 +1,19 @@
-package com.jack.lockscreenweather.notify
+package com.jack.lockdeck.notify
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.jack.lockscreenweather.data.Store
+import com.jack.lockdeck.data.Store
 
 /**
  * 刷新 / 重发广播：锁屏和通知栏上直接触发，不需要解锁。
  */
 class RefreshReceiver : BroadcastReceiver() {
     companion object {
-        const val ACTION_REFRESH = "com.jack.lockscreenweather.REFRESH"
+        const val ACTION_REFRESH = "com.jack.lockdeck.REFRESH"
 
         /** 通知被划掉后补发自己 */
-        const val ACTION_REPOST = "com.jack.lockscreenweather.REPOST"
+        const val ACTION_REPOST = "com.jack.lockdeck.REPOST"
     }
 
     override fun onReceive(ctx: Context, intent: Intent) {

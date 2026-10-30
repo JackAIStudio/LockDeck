@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.tile
+package com.jack.lockdeck.tile
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -6,10 +6,10 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import com.jack.lockscreenweather.R
-import com.jack.lockscreenweather.action.QuickAction
-import com.jack.lockscreenweather.data.Store
-import com.jack.lockscreenweather.overlay.LaunchTrampolineActivity
+import com.jack.lockdeck.R
+import com.jack.lockdeck.action.QuickAction
+import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.overlay.LaunchTrampolineActivity
 
 /**
  * 天气磁贴：右侧下拉（控制中心）直接看天气。

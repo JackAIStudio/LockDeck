@@ -1,8 +1,8 @@
-package com.jack.lockscreenweather.action
+package com.jack.lockdeck.action
 
 import android.content.Context
 import android.content.Intent
-import com.jack.lockscreenweather.overlay.LaunchTrampolineActivity
+import com.jack.lockdeck.overlay.LaunchTrampolineActivity
 
 /**
  * 所有入口（锁屏卡片、控制中心磁贴、通知按钮）的统一出口。
@@ -18,8 +18,8 @@ object ActionRunner {
     fun run(ctx: Context, zone: String, id: String) {
         if (id == QuickAction.REFRESH) {
             ctx.sendBroadcast(
-                Intent(ctx, com.jack.lockscreenweather.notify.RefreshReceiver::class.java).apply {
-                    action = com.jack.lockscreenweather.notify.RefreshReceiver.ACTION_REFRESH
+                Intent(ctx, com.jack.lockdeck.notify.RefreshReceiver::class.java).apply {
+                    action = com.jack.lockdeck.notify.RefreshReceiver.ACTION_REFRESH
                 }
             )
             return

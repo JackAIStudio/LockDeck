@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.action
+package com.jack.lockdeck.action
 
 import android.content.Context
 import android.content.Intent

@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.data
+package com.jack.lockdeck.data
 
 import android.content.Context
 
@@ -60,9 +60,9 @@ object Store {
 
     /** 磁贴 1 / 2 的出厂默认：支付宝扫一扫、微信扫一扫 */
     fun defaultTileAction(slot: Int): String = when (slot) {
-        1 -> com.jack.lockscreenweather.action.QuickAction.ALIPAY_SCAN
-        2 -> com.jack.lockscreenweather.action.QuickAction.WECHAT_SCAN
-        else -> com.jack.lockscreenweather.action.QuickAction.ALIPAY_SCAN
+        1 -> com.jack.lockdeck.action.QuickAction.ALIPAY_SCAN
+        2 -> com.jack.lockdeck.action.QuickAction.WECHAT_SCAN
+        else -> com.jack.lockdeck.action.QuickAction.ALIPAY_SCAN
     }
 
     // ---- 卡片开关 ----

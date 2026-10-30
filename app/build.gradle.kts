@@ -5,10 +5,10 @@ plugins {
 }
 
 android {
-  namespace = "com.jack.lockscreenweather"
+  namespace = "com.jack.lockdeck"
   compileSdk = 37
   defaultConfig {
-    applicationId = "com.jack.lockscreenweather"
+    applicationId = "com.jack.lockdeck"
     minSdk = 31
     targetSdk = 37
     versionCode = 1

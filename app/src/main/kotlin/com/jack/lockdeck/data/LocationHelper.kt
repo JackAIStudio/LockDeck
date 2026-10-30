@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.data
+package com.jack.lockdeck.data
 
 import android.Manifest
 import android.annotation.SuppressLint

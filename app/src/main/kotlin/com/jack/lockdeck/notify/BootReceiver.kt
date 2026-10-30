@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.notify
+package com.jack.lockdeck.notify
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -12,7 +12,7 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             "android.intent.action.QUICKBOOT_POWERON",
             -> {
-                if (com.jack.lockscreenweather.data.Store.isOverlayEnabled(ctx) || com.jack.lockscreenweather.data.Store.isEnabled(ctx)) {
+                if (com.jack.lockdeck.data.Store.isOverlayEnabled(ctx) || com.jack.lockdeck.data.Store.isEnabled(ctx)) {
                     WeatherWorker.schedule(ctx)
                     WeatherWorker.enqueueNow(ctx)
                 }

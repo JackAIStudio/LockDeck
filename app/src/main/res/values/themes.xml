@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.LockScreenWeather" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.LockDeck" parent="android:Theme.Material.Light.NoActionBar" />
 
     <!-- 浮层用透明主题，避免出现白底 -->
     <style name="Theme.LockOverlay" parent="android:Theme.Material.NoActionBar">

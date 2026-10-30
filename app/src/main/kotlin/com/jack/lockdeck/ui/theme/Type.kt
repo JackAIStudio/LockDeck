@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.ui.theme
+package com.jack.lockdeck.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

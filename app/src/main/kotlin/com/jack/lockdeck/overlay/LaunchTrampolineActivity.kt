@@ -1,11 +1,11 @@
-package com.jack.lockscreenweather.overlay
+package com.jack.lockdeck.overlay
 
 import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import com.jack.lockscreenweather.action.QuickAction
+import com.jack.lockdeck.action.QuickAction
 
 /**
  * 从锁屏点击卡片 / 控制中心磁贴后，真正把目标页面送到前台。

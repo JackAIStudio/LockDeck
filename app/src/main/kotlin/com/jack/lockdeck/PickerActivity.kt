@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather
+package com.jack.lockdeck
 
 import android.content.Intent
 import android.os.Bundle
@@ -25,10 +25,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.jack.lockscreenweather.action.QuickAction
-import com.jack.lockscreenweather.data.Store
-import com.jack.lockscreenweather.notify.WeatherNotifier
-import com.jack.lockscreenweather.ui.theme.LockScreenWeatherTheme
+import com.jack.lockdeck.action.QuickAction
+import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.notify.WeatherNotifier
+import com.jack.lockdeck.ui.theme.LockDeckTheme
 
 /**
  * 选择某个点击区（或磁贴）要跑哪个动作。
@@ -44,7 +44,7 @@ class PickerActivity : ComponentActivity() {
         val zone = intent.getStringExtra("zone") ?: "main"
         enableEdgeToEdge()
         setContent {
-            LockScreenWeatherTheme {
+            LockDeckTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val ctx = LocalContext.current
                     val apps = remember {

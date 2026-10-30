@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.tile
+package com.jack.lockdeck.tile
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -6,10 +6,10 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import com.jack.lockscreenweather.R
-import com.jack.lockscreenweather.action.QuickAction
-import com.jack.lockscreenweather.data.Store
-import com.jack.lockscreenweather.overlay.LaunchTrampolineActivity
+import com.jack.lockdeck.R
+import com.jack.lockdeck.action.QuickAction
+import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.overlay.LaunchTrampolineActivity
 
 /**
  * 控制中心磁贴的公共实现：点一下就跑一个动作。
@@ -41,8 +41,8 @@ abstract class BaseActionTileService : TileService() {
         if (id == QuickAction.REFRESH) {
             // 刷新不需要界面，广播即可
             sendBroadcast(
-                Intent(this, com.jack.lockscreenweather.notify.RefreshReceiver::class.java).apply {
-                    action = com.jack.lockscreenweather.notify.RefreshReceiver.ACTION_REFRESH
+                Intent(this, com.jack.lockdeck.notify.RefreshReceiver::class.java).apply {
+                    action = com.jack.lockdeck.notify.RefreshReceiver.ACTION_REFRESH
                 }
             )
             return

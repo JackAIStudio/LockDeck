@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.overlay
+package com.jack.lockdeck.overlay
 
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
@@ -18,9 +18,9 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.jack.lockscreenweather.R
-import com.jack.lockscreenweather.data.Store
-import com.jack.lockscreenweather.data.Weather
+import com.jack.lockdeck.R
+import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.data.Weather
 
 /**
  * 锁屏天气浮层。
@@ -482,7 +482,7 @@ class LockScreenOverlayService : AccessibilityService() {
         fallback: String,
     ) {
         val id = Store.getTarget(this, zone) ?: fallback
-        val qa = com.jack.lockscreenweather.action.QuickAction
+        val qa = com.jack.lockdeck.action.QuickAction
         root.findViewById<TextView>(nameId)?.text = qa.shortLabel(this, id)
         root.findViewById<TextView>(iconId)?.text = qa.glyph(this, id)
     }
@@ -555,13 +555,13 @@ class LockScreenOverlayService : AccessibilityService() {
     private fun runAction(zone: String, fallback: String) {
         val id = Store.getTarget(this, zone) ?: fallback
         android.util.Log.i("LSW", "zone $zone -> $id")
-        com.jack.lockscreenweather.action.ActionRunner.run(this, zone, id)
+        com.jack.lockdeck.action.ActionRunner.run(this, zone, id)
     }
 
     private companion object {
-        const val WEATHER_PKG = com.jack.lockscreenweather.action.QuickAction.PKG_WEATHER
-        const val DEFAULT_ACTION1 = com.jack.lockscreenweather.action.QuickAction.ALIPAY_SCAN
-        const val DEFAULT_ACTION2 = com.jack.lockscreenweather.action.QuickAction.WECHAT_SCAN
+        const val WEATHER_PKG = com.jack.lockdeck.action.QuickAction.PKG_WEATHER
+        const val DEFAULT_ACTION1 = com.jack.lockdeck.action.QuickAction.ALIPAY_SCAN
+        const val DEFAULT_ACTION2 = com.jack.lockdeck.action.QuickAction.WECHAT_SCAN
     }
 
 }

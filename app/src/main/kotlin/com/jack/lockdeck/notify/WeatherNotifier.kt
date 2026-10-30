@@ -1,4 +1,4 @@
-package com.jack.lockscreenweather.notify
+package com.jack.lockdeck.notify
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -9,12 +9,12 @@ import android.content.Intent
 import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.jack.lockscreenweather.R
-import com.jack.lockscreenweather.data.LocationHelper
-import com.jack.lockscreenweather.data.Store
-import com.jack.lockscreenweather.data.Weather
-import com.jack.lockscreenweather.action.QuickAction
-import com.jack.lockscreenweather.data.WeatherApi
+import com.jack.lockdeck.R
+import com.jack.lockdeck.data.LocationHelper
+import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.data.Weather
+import com.jack.lockdeck.action.QuickAction
+import com.jack.lockdeck.data.WeatherApi
 
 /**
  * 通知栏天气卡片。
@@ -201,9 +201,9 @@ object WeatherNotifier {
      * 用户得自己上滑，看起来就像"点了没反应"。
      */
     private fun actionPendingIntent(ctx: Context, actionId: String, requestCode: Int): PendingIntent {
-        val intent = Intent(ctx, com.jack.lockscreenweather.overlay.LaunchTrampolineActivity::class.java).apply {
+        val intent = Intent(ctx, com.jack.lockdeck.overlay.LaunchTrampolineActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(com.jack.lockscreenweather.overlay.LaunchTrampolineActivity.EXTRA_ACTION, actionId)
+            putExtra(com.jack.lockdeck.overlay.LaunchTrampolineActivity.EXTRA_ACTION, actionId)
         }
         return PendingIntent.getActivity(
             ctx, requestCode, intent,
