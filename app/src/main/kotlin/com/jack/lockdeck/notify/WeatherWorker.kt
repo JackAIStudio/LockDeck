@@ -12,6 +12,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.jack.lockdeck.data.LocationHelper
 import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.tile.WeatherTileInUse
 import com.jack.lockdeck.data.WeatherApi
 import java.util.concurrent.TimeUnit
 
@@ -26,31 +27,24 @@ import java.util.concurrent.TimeUnit
 class WeatherWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
 
     override suspend fun doWork(): Result {
-        // 浮层模式或通知模式任一开启都要刷新（之前只判断 isEnabled，
-        // 导致用浮层时 Worker 每次直接返回，界面永远停在旧数据）
-        val needRefresh = Store.isOverlayEnabled(applicationContext) || Store.isEnabled(applicationContext)
-        if (!needRefresh) return Result.success()
+        // 通知栏关着时：若天气磁贴已经加进控制中心，还是得抓——它读的是这份缓存，
+        // 不抓就一直停在「暂无数据」。没加磁贴就不为空跑请求。
+        val tileUsed = WeatherTileInUse.marked(applicationContext)
+        if (!Store.isEnabled(applicationContext) && !tileUsed) return Result.success()
 
         val fix = LocationHelper.lastKnown(applicationContext) ?: LocationHelper.FALLBACK
         val fetched = WeatherApi.fetch(fix.lat, fix.lon).getOrNull()
             ?: return Result.retry()
 
-        // 城市名只在没缓存过或位置变了才反查，省流量
-        val cached = Store.loadWeather(applicationContext)
-        val city = if (cached?.city.isNullOrBlank()) {
-            WeatherApi.reverseCity(fix.lat, fix.lon)
-        } else {
-            cached!!.city
-        }
+        // 城市名只在没缓存过时反查，省流量
+        val cachedCity = Store.loadWeather(applicationContext)?.city.orEmpty()
+        val city = cachedCity.ifBlank { WeatherApi.reverseCity(fix.lat, fix.lon) }
 
         val w = fetched.copy(city = city)
         Store.saveWeather(applicationContext, w)
 
-        // 通知模式：重发常驻通知（内部走前台服务那条，只发一条）
+        // 重写常驻通知，保证下拉第一屏和锁屏上都是新数据
         WeatherNotifier.show(applicationContext, w)
-
-        // 浮层模式：写 bump 让无障碍服务立刻重绘（不然要等下一次锁屏才更新）
-        Store.bumpOverlayRefresh(applicationContext)
 
         return Result.success()
     }

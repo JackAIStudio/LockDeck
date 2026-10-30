@@ -5,6 +5,14 @@ import android.content.Context
 /** 极简本地存储：天气快照 + 每个点击区绑定的包名。 */
 object Store {
     private const val P = "lsw"
+    /**
+     * 原始 SharedPreferences。
+     *
+     * 只在「另一个功能模块想存自己的小标记」时才该用（比如磁贴的 in-use 标记）。
+     * 一般配置一律在本文件里加具名的 get/set——键散落在外面最容易变成一堆没人敢删的死键。
+     */
+    fun prefs(ctx: Context) = sp(ctx)
+
     private fun sp(ctx: Context) = ctx.getSharedPreferences(P, Context.MODE_PRIVATE)
 
     // ---- 天气快照 ----
@@ -75,44 +83,25 @@ object Store {
 
     fun getError(ctx: Context): String? = sp(ctx).getString("lastError", null)
 
-    // ---- 锁屏浮层开关 ----
-    fun isOverlayEnabled(ctx: Context): Boolean = sp(ctx).getBoolean("ovEnabled", false)
-    fun setOverlayEnabled(ctx: Context, on: Boolean) =
-        sp(ctx).edit().putBoolean("ovEnabled", on).apply()
-
-    // ---- 无障碍服务连接状态（供 UI 显示）----
-    fun setA11yConnected(ctx: Context, on: Boolean) =
-        sp(ctx).edit().putBoolean("a11y", on).apply()
-
-    fun isA11yConnected(ctx: Context): Boolean = sp(ctx).getBoolean("a11y", false)
-
-    // ---- 浮层纵向位置 ----
-    fun getOverlayY(ctx: Context): Int = sp(ctx).getInt("ovY", 980)
-    fun setOverlayY(ctx: Context, y: Int) = sp(ctx).edit().putInt("ovY", y).apply()
-
-    // ---- 手动触发浮层刷新（App 内点击时用）----
-    fun bumpOverlayRefresh(ctx: Context) =
-        sp(ctx).edit().putLong("ovBump", System.currentTimeMillis()).apply()
-
-    fun getOverlayBump(ctx: Context): Long = sp(ctx).getLong("ovBump", 0L)
-
-
     // ---- 刷新间隔（分钟），默认 10 ----
     fun getRefreshMinutes(ctx: Context): Int = sp(ctx).getInt("refreshMin", 10)
     fun setRefreshMinutes(ctx: Context, m: Int) =
         sp(ctx).edit().putInt("refreshMin", m.coerceIn(5, 120)).apply()
 
-    // ---- 浮层是否显示降雨提示 ----
-    fun isRainHintEnabled(ctx: Context): Boolean = sp(ctx).getBoolean("rainHint", true)
-    fun setRainHintEnabled(ctx: Context, on: Boolean) =
-        sp(ctx).edit().putBoolean("rainHint", on).apply()
-
-    // ---- 通知栏用自定义卡片（而不是系统原生样式）----
-    fun isNotifCardEnabled(ctx: Context): Boolean = sp(ctx).getBoolean("notifCard", true)
-    fun setNotifCardEnabled(ctx: Context, on: Boolean) =
-        sp(ctx).edit().putBoolean("notifCard", on).apply()
-
-    // ---- 卡片是否已被用户手动定位过 ----
-    fun hasCustomY(ctx: Context): Boolean = sp(ctx).getBoolean("ovYCustom", false)
-    fun markCustomY(ctx: Context) = sp(ctx).edit().putBoolean("ovYCustom", true).apply()
+    /**
+     * 清掉旧版本锁屏浮层留下的死键。
+     *
+     * 早期版本用无障碍浮层把卡片画在锁屏之上（键 ovEnabled / ovY / ovBump /
+     * ovYCustom / a11y / rainHint / notifCard）。那套东西会盖在别人的通知上、
+     * 还每 1.5 秒轮询一次无障碍节点树，又丑又卡，已经整个删掉。
+     *
+     * 升级上来的机器 SharedPreferences 里还留着这些键。留着不会崩，但以后
+     * 翻到它们的人会以为是有用的配置，所以一次性清掉。
+     */
+    fun purgeLegacyOverlayPrefs(ctx: Context) {
+        val p = sp(ctx)
+        val legacy = listOf("ovEnabled", "ovY", "ovBump", "ovYCustom", "a11y", "rainHint", "notifCard")
+        if (legacy.none { p.contains(it) }) return
+        p.edit().apply { legacy.forEach { remove(it) } }.apply()
+    }
 }

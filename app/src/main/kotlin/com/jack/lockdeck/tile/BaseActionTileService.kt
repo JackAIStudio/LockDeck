@@ -9,7 +9,7 @@ import android.service.quicksettings.TileService
 import com.jack.lockdeck.R
 import com.jack.lockdeck.action.QuickAction
 import com.jack.lockdeck.data.Store
-import com.jack.lockdeck.overlay.LaunchTrampolineActivity
+import com.jack.lockdeck.launch.LaunchTrampolineActivity
 
 /**
  * 控制中心磁贴的公共实现：点一下就跑一个动作。

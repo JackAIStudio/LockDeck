@@ -36,6 +36,9 @@ import com.jack.lockdeck.ui.theme.LockDeckTheme
  * 分两段：
  *   1. 内置动作 —— 支付宝扫一扫、微信扫一扫这类一步到位的
  *   2. 任意 App  —— 从已安装应用里挑一个
+ *
+ * 现在只有控制中心磁贴（tile1 / tile2）和「通知点开后打开」（main）会进来。
+ * 锁屏浮层那套三区（main / app1 / app2）已经删了，只剩 main 还在用。
  */
 class PickerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,9 +87,7 @@ class PickerActivity : ComponentActivity() {
                                 Text("选择动作", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                                 Text(
                                     when {
-                                        zone == "main" -> "绑到：锁屏卡片 · 天气区"
-                                        zone == "app1" -> "绑到：锁屏卡片 · 按钮 1"
-                                        zone == "app2" -> "绑到：锁屏卡片 · 按钮 2"
+                                        zone == "main" -> "绑到：点通知栏那条天气之后打开"
                                         zone == "tile1" -> "绑到：控制中心 · 磁贴 1"
                                         zone == "tile2" -> "绑到：控制中心 · 磁贴 2"
                                         else -> "绑到：$zone"

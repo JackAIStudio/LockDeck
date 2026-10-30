@@ -2,7 +2,7 @@ package com.jack.lockdeck.action
 
 import android.content.Context
 import android.content.Intent
-import com.jack.lockdeck.overlay.LaunchTrampolineActivity
+import com.jack.lockdeck.launch.LaunchTrampolineActivity
 
 /**
  * 所有入口（锁屏卡片、控制中心磁贴、通知按钮）的统一出口。

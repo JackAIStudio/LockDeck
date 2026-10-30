@@ -1,4 +1,4 @@
-package com.jack.lockdeck.overlay
+package com.jack.lockdeck.launch
 
 import android.app.Activity
 import android.app.KeyguardManager

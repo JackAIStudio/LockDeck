@@ -20,16 +20,13 @@ class RefreshReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_REFRESH -> {
                 WeatherWorker.enqueueNow(ctx)
-                // 先给一个"刷新中"的反馈，避免用户以为没反应
+                // 先重写一次通知，避免用户以为没反应
                 WeatherNotifier.show(ctx, Store.loadWeather(ctx))
             }
 
             ACTION_REPOST -> {
                 // 被左滑划掉了：只补发一次，不做循环重试。
-                //
-                // 不能走 WeatherNotifier.show()：它内部还会再判一次开关，
-                // 而且当时是为了「常驻通知」这条链路写的。
-                // 这里直接叫前台服务重挂，开关由调用方判一次就够。
+                // 用户铁了心要它消失就去设置里关开关，反复弹回来只会招人烦。
                 if (Store.isEnabled(ctx)) {
                     WeatherForegroundService.refresh(ctx, Store.loadWeather(ctx))
                 }

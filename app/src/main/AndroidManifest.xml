@@ -75,7 +75,7 @@
 
         <!-- 从锁屏跳转目标 App 的透明中间页：主动请求解锁，避免"点了要手动上滑" -->
         <activity
-            android:name=".overlay.LaunchTrampolineActivity"
+            android:name=".launch.LaunchTrampolineActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:noHistory="true"
@@ -109,20 +109,6 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="在锁屏常驻显示天气信息" />
-        </service>
-
-        <!-- 锁屏浮层：TYPE_ACCESSIBILITY_OVERLAY 允许覆盖锁屏 -->
-        <service
-            android:name=".overlay.LockScreenOverlayService"
-            android:exported="false"
-            android:label="@string/app_name"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/lockscreen_a11y" />
         </service>
 
         <!-- 开机与更新后重新拉起常驻通知 -->

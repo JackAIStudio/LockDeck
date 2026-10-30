@@ -9,7 +9,7 @@ import android.service.quicksettings.TileService
 import com.jack.lockdeck.R
 import com.jack.lockdeck.action.QuickAction
 import com.jack.lockdeck.data.Store
-import com.jack.lockdeck.overlay.LaunchTrampolineActivity
+import com.jack.lockdeck.launch.LaunchTrampolineActivity
 
 /**
  * 天气磁贴：右侧下拉（控制中心）直接看天气。
@@ -17,25 +17,30 @@ import com.jack.lockdeck.overlay.LaunchTrampolineActivity
  * 磁贴能显示的东西有限——只有 label + subtitle + 图标，
  * 但刚好够放"23°"和"晴 · 温州"。点一下打开小米天气看详情。
  *
- * 为什么不做成"左侧下拉的天气卡片"：
- * MIUI 会把第三方 App 的常驻通知统一折叠进「更多通知」，
- * 无论 importance 调多高都一样（实测 DEFAULT/HIGH 都折叠）。
- * 控制中心磁贴是唯一能稳定出现在下拉第一屏的位置。
+ * 扫一扫、收付款这些「点一下就发生」的动作只留在这里（控制中心），
+ * 通知栏那条只负责信息展示——两处不重复，用户不用记两套入口。
+ *
+ * 天气数据不在这里抓：onStartListening 会被系统高频调用，抓一次就是一次网络请求。
+ * 数据由 [com.jack.lockdeck.notify.WeatherWorker] 定时写进缓存，这里只读取。
+ * 只要磁贴被摆进控制中心过，就会打上 [WeatherTileInUse] 标记，
+ * 通知栏关掉之后 Worker 仍会继续刷新它。
  */
 class WeatherTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
+        // 系统把它挂到控制中心、即将显示时必然走这里——借此确认「磁贴还在用」，
+        // 通知栏关掉后由 Worker 继续刷新它。
+        WeatherTileInUse.mark(this)
         refreshTile()
     }
 
     override fun onClick() {
         super.onClick()
-        val target = QuickAction.intentFor(this, QuickAction.openApp(QuickAction.PKG_WEATHER))
-            ?: return
         val trampoline = Intent(this, LaunchTrampolineActivity::class.java).apply {
             putExtra(LaunchTrampolineActivity.EXTRA_ACTION, QuickAction.openApp(QuickAction.PKG_WEATHER))
             putExtra(LaunchTrampolineActivity.EXTRA_ZONE, "weatherTile")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching {
             startActivityAndCollapse(

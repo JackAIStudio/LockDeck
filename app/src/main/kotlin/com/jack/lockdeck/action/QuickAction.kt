@@ -5,7 +5,7 @@ import android.content.Intent
 import android.net.Uri
 
 /**
- * 一个"快捷动作"：卡片按钮、通知按钮、控制中心磁贴共用同一套定义。
+ * 一个"快捷动作"：控制中心磁贴、通知栏点击共用的定义。
  *
  * 用字符串 id 存储（SharedPreferences 里只存一个 id），
  * 所以以后加新动作不用改存储格式。
@@ -76,7 +76,7 @@ object QuickAction {
         REFRESH,
     )
 
-    /** 卡片/磁贴上显示的短名字 */
+    /** 磁贴上显示的短名字 */
     fun label(ctx: Context, id: String): String = when (id) {
         ALIPAY_SCAN -> "支付宝扫一扫"
         WECHAT_SCAN -> "微信扫一扫"
@@ -86,7 +86,7 @@ object QuickAction {
         else -> appPackageOf(id)?.let { pkg -> appLabel(ctx, pkg) } ?: "未设置"
     }
 
-    /** 卡片按钮下面那行更短的文案（宽度有限） */
+    /** 磁贴副标题用的更短文案（宽度有限） */
     fun shortLabel(ctx: Context, id: String): String = when (id) {
         ALIPAY_SCAN -> "扫一扫"
         WECHAT_SCAN -> "扫一扫"
@@ -94,22 +94,6 @@ object QuickAction {
         WECHAT_PAY -> "收付款"
         REFRESH -> "刷新"
         else -> appLabel(ctx, appPackageOf(id).orEmpty()).take(6)
-    }
-
-    /** 用在 TextView 里的单字图标 */
-    fun glyph(ctx: Context, id: String): String = when (id) {
-        ALIPAY_SCAN -> "⌗"
-        WECHAT_SCAN -> "⌗"
-        ALIPAY_PAY -> "¥"
-        WECHAT_PAY -> "¥"
-        REFRESH -> "↻"
-        else -> when (appPackageOf(id)) {
-            PKG_WECHAT -> "💬"
-            PKG_ALIPAY -> "💳"
-            PKG_WEATHER -> "☀"
-            "com.android.deskclock" -> "⏰"
-            else -> "▣"
-        }
     }
 
     private fun appLabel(ctx: Context, pkg: String): String {

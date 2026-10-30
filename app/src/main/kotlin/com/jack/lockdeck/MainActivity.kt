@@ -46,6 +46,7 @@ import com.jack.lockdeck.data.Store
 import com.jack.lockdeck.notify.WeatherForegroundService
 import com.jack.lockdeck.notify.WeatherNotifier
 import com.jack.lockdeck.notify.WeatherWorker
+import com.jack.lockdeck.tile.WeatherTileInUse
 import com.jack.lockdeck.ui.theme.LockDeckTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,24 +60,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // App 一起来就把常驻通知挂上（这是用户真正要的"通知栏一行"），
-        // 不依赖用户去点刷新按钮。
-        runCatching {
-            if (com.jack.lockdeck.data.Store.isEnabled(this)) {
-                com.jack.lockdeck.notify.WeatherForegroundService
-                    .refresh(this, com.jack.lockdeck.data.Store.loadWeather(this))
-            }
+        // 旧版本的锁屏浮层设置在这里清掉（那套东西已经整个删了）
+        Store.purgeLegacyOverlayPrefs(this)
+        // App 一起来就把常驻通知挂上，不依赖用户去点刷新按钮。
+        if (Store.isEnabled(this)) {
+            WeatherForegroundService.refresh(this, Store.loadWeather(this))
         }
         setContent {
             LockDeckTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val ctx = LocalContext.current
-                    var enabled by remember { mutableStateOf(Store.isOverlayEnabled(ctx)) }
-                    var a11y by remember { mutableStateOf(Store.isA11yConnected(ctx)) }
                     var weather by remember { mutableStateOf(Store.loadWeather(ctx)) }
                     var busy by remember { mutableStateOf(false) }
                     var log by remember { mutableStateOf("") }
-                    var tick by remember { mutableStateOf(0) }
 
                     fun refresh() {
                         busy = true
@@ -102,52 +98,13 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text("锁屏快捷台", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                "锁屏卡片：天气 + 两个自定义按钮；控制中心：天气和两个自定义磁贴；" +
-                                    "通知栏：解锁后可点的一行天气卡片。",
+                                "通知栏：一条常驻天气信息，和解锁后的其它通知长一个样；" +
+                                    "控制中心：天气 + 两个自定义磁贴。两个地方各管各的，不重叠。",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
 
-                            Card {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                    Text("锁屏卡片", fontWeight = FontWeight.Medium)
-                                        Text(
-                                            when {
-                                                !enabled -> "未开启"
-                                                !a11y -> "已开启，但缺少无障碍权限"
-                                                else -> "已开启，锁屏亮屏时显示"
-                                            },
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Switch(
-                                        checked = enabled,
-                                        onCheckedChange = { on ->
-                                            enabled = on
-                                            Store.setOverlayEnabled(ctx, on)
-                                            if (on) {
-                                                WeatherWorker.schedule(ctx)
-                                                WeatherWorker.enqueueNow(ctx)
-                                                if (!Store.isA11yConnected(ctx)) {
-                                                    // 没开无障碍时引导去开
-                                                    ctx.startActivity(
-                                                        Intent("android.settings.ACCESSIBILITY_SETTINGS")
-                                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                    )
-                                                }
-                                            } else {
-                                                WeatherWorker.cancel(ctx)
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-
+                            // ---------- 天气速览 ----------
                             Card(
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -155,7 +112,7 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                                     Text(
-                                        "卡片预览（实际以锁屏为准）",
+                                        "通知栏现在显示的内容",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -185,6 +142,53 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 }
+                            }
+
+                            // ---------- 通知栏常驻 ----------
+                            var notifOn by remember { mutableStateOf(Store.isEnabled(ctx)) }
+                            Card {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("通知栏常驻天气", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                        Text(
+                                            "左边下拉第一屏常驻一行，系统原生样式，不折叠",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Switch(
+                                        checked = notifOn,
+                                        onCheckedChange = { on ->
+                                            notifOn = on
+                                            Store.setEnabled(ctx, on)
+                                            if (on) {
+                                                permsLauncher.launch(
+                                                    arrayOf(Manifest.permission.POST_NOTIFICATIONS)
+                                                )
+                                                WeatherWorker.schedule(ctx)
+                                                WeatherWorker.enqueueNow(ctx)
+                                                WeatherForegroundService.refresh(ctx, Store.loadWeather(ctx))
+                                                log = "已开启，通知几秒内出现"
+                                            } else {
+                                                WeatherNotifier.cancel(ctx)
+                                                WeatherForegroundService.stop(ctx)
+                                                if (!WeatherTileInUse.marked(ctx)) WeatherWorker.cancel(ctx)
+                                                log = "已关闭通知栏天气"
+                                            }
+                                        },
+                                    )
+                                }
+                                Text(
+                                    "锁屏上不会显示这条（HyperOS 的锁屏通知区只放系统级通知，" +
+                                        "第三方的一律不进去；早期版本用无障碍浮层强行盖上去，" +
+                                        "会挡住别人的通知还卡，已经删了）。锁屏看天气请下拉控制中心。",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                                )
                             }
 
                             // ---------- 刷新间隔 ----------
@@ -218,187 +222,12 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            // ---------- 卡片位置 ----------
-                            var ovY by remember { mutableStateOf(Store.getOverlayY(ctx)) }
-                            Card {
-                                Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                    Text("卡片位置", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                    Text(
-                                        "锁屏上卡片的纵向位置（数值越大越靠下）",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Spacer(Modifier.height(6.dp))
-                                    Text("当前：$ovY", fontSize = 13.sp)
-                                    androidx.compose.material3.Slider(
-                                        value = ovY.toFloat(),
-                                        onValueChange = { ovY = it.toInt() },
-                                        onValueChangeFinished = {
-                                            Store.setOverlayY(ctx, ovY)
-                                            Store.markCustomY(ctx)
-                                            Store.bumpOverlayRefresh(ctx)
-                                            log = "位置已保存：$ovY"
-                                        },
-                                        valueRange = 300f..1800f,
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                ovY = 1150
-                                                Store.setOverlayY(ctx, ovY)
-                                                Store.markCustomY(ctx)
-                                                Store.bumpOverlayRefresh(ctx)
-                                                log = "已设为保守位置 1150"
-                                            },
-                                        ) { Text("用保守位置") }
-                                        OutlinedButton(
-                                            onClick = {
-                                                ovY = 1000
-                                                Store.setOverlayY(ctx, ovY)
-                                                Store.markCustomY(ctx)
-                                                Store.bumpOverlayRefresh(ctx)
-                                            },
-                                        ) { Text("靠上") }
-                                    }
-                                }
-                            }
+                            HorizontalDivider()
 
-                            // ---------- 降雨提示 ----------
-                            var rainOn by remember { mutableStateOf(Store.isRainHintEnabled(ctx)) }
-                            Card {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("降雨提示", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                        Text(
-                                            "降雨概率高时在卡片上提示带伞",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Switch(
-                                        checked = rainOn,
-                                        onCheckedChange = {
-                                            rainOn = it
-                                            Store.setRainHintEnabled(ctx, it)
-                                            Store.bumpOverlayRefresh(ctx)
-                                            log = if (it) "已开启降雨提示" else "已关闭降雨提示"
-                                        },
-                                    )
-                                }
-                            }
-
-                            // ---------- 通知栏常驻卡片 ----------
-                            // 开关只留一个：之前通知开了却看不到，是因为
-                            // 界面上根本没有「发通知」的开关，Store.setEnabled 从来没有调用点。
-                            var notifOn by remember { mutableStateOf(Store.isEnabled(ctx)) }
-                            Card {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("通知栏常驻天气", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                        Text(
-                                            "解锁后左侧下拉第一屏显示天气和两个「扫一扫」按钮",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Switch(
-                                        checked = notifOn,
-                                        onCheckedChange = { on ->
-                                            notifOn = on
-                                            Store.setEnabled(ctx, on)
-                                            if (on) {
-                                                permsLauncher.launch(
-                                                    arrayOf(Manifest.permission.POST_NOTIFICATIONS)
-                                                )
-                                                WeatherWorker.schedule(ctx)
-                                                WeatherWorker.enqueueNow(ctx)
-                                                WeatherForegroundService.refresh(ctx, Store.loadWeather(ctx))
-                                                log = "已开启通知栏天气，稍等几秒出现"
-                                            } else {
-                                                WeatherNotifier.cancel(ctx)
-                                                WeatherForegroundService.stop(ctx)
-                                                if (!Store.isOverlayEnabled(ctx)) WeatherWorker.cancel(ctx)
-                                                log = "已关闭通知栏天气"
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-
-                            // ---------- 通知栏样式 ----------
-                            var notifCard by remember { mutableStateOf(Store.isNotifCardEnabled(ctx)) }
-                            Card {
-                                Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text("通知栏用自定义卡片", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                            Text(
-                                                "一行放下天气 + 两个按钮，点一下就扫。关掉则用系统原生样式。",
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        Switch(
-                                            checked = notifCard,
-                                            onCheckedChange = {
-                                                notifCard = it
-                                                Store.setNotifCardEnabled(ctx, it)
-                                                WeatherNotifier.show(ctx, Store.loadWeather(ctx))
-                                                log = if (it) "通知栏已改为自定义卡片" else "通知栏已改回系统样式"
-                                            },
-                                        )
-                                    }
-                                    Text(
-                                        "注：MIUI 会把不打扰的常驻通知折叠进「更多通知」，两种样式都一样。" +
-                                            "左侧下拉第一屏能不能看到，取决于系统，App 改不了。",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-
-                            Text("卡片按钮绑定", fontWeight = FontWeight.Medium)
-                            TargetRow(
-                                title = "天气区",
-                                desc = "点温度那里 -> 运行",
-                                current = Store.getTarget(ctx, "main")
-                                    ?: QuickAction.openApp(QuickAction.PKG_WEATHER),
-                                onPick = {
-                                    ctx.startActivity(
-                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "main")
-                                    )
-                                },
-                            )
-                            TargetRow(
-                                title = "卡片按钮 1",
-                                desc = "锁屏卡片左按钮 -> 运行",
-                                current = Store.getTarget(ctx, "app1") ?: QuickAction.ALIPAY_SCAN,
-                                onPick = {
-                                    ctx.startActivity(
-                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "app1")
-                                    )
-                                },
-                            )
-                            TargetRow(
-                                title = "卡片按钮 2",
-                                desc = "锁屏卡片右按钮 -> 运行",
-                                current = Store.getTarget(ctx, "app2") ?: QuickAction.WECHAT_SCAN,
-                                onPick = {
-                                    ctx.startActivity(
-                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "app2")
-                                    )
-                                },
-                            )
-
+                            // ---------- 控制中心磁贴 ----------
                             Text("控制中心磁贴", fontWeight = FontWeight.Medium)
                             Text(
-                                "下拉控制中心 -> 点「编辑」-> 把「天气 / 磁贴 1 / 磁贴 2」拖到上面。" +
+                                "扫一扫、收付款都放在这里——下拉控制中心点一下就走。" +
                                     "HyperOS 的磁贴只显示图标，不显示文字。",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -420,6 +249,16 @@ class MainActivity : ComponentActivity() {
                                 onPick = {
                                     ctx.startActivity(
                                         Intent(ctx, PickerActivity::class.java).putExtra("zone", "tile2")
+                                    )
+                                },
+                            )
+                            TargetRow(
+                                title = "通知点开后打开",
+                                desc = "点通知栏那条天气 -> 打开",
+                                current = Store.getTarget(ctx, "main") ?: QuickAction.openApp(QuickAction.PKG_WEATHER),
+                                onPick = {
+                                    ctx.startActivity(
+                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "main")
                                     )
                                 },
                             )
@@ -446,7 +285,7 @@ class MainActivity : ComponentActivity() {
                                     log = if (ok) {
                                         "系统弹出确认框时点「添加」；之后可下拉控制中心 -> 编辑 调整位置"
                                     } else {
-                                        "请下拉控制中心 -> 点「编辑」-> 把「磁贴 1 / 磁贴 2」拖到上面"
+                                        "请下拉控制中心 -> 点「编辑」-> 把「磁贴 1 / 磁贴 2 / 天气」拖到上面"
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
@@ -463,26 +302,16 @@ class MainActivity : ComponentActivity() {
 
                                 OutlinedButton(
                                     onClick = {
-                                        if (Store.isOverlayEnabled(ctx)) {
-                                            Store.bumpOverlayRefresh(ctx)
-                                            log = "已通知卡片刷新"
+                                        if (Store.isEnabled(ctx)) {
+                                            WeatherNotifier.show(ctx, Store.loadWeather(ctx))
+                                            log = "已重写通知"
                                         } else {
-                                            log = "请先开启锁屏卡片"
+                                            log = "请先开启通知栏常驻天气"
                                         }
                                     },
                                     modifier = Modifier.weight(1f),
-                                ) { Text("刷新卡片") }
+                                ) { Text("刷新通知") }
                             }
-
-                            Button(
-                                onClick = {
-                                    ctx.startActivity(
-                                        Intent("android.settings.ACCESSIBILITY_SETTINGS")
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text(if (a11y) "无障碍权限已开启" else "开启无障碍权限（必需）") }
 
                             TextButton(
                                 onClick = {
@@ -493,7 +322,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     )
                                 },
-                            ) { Text("授予定位权限") }
+                            ) { Text("授予通知与定位权限") }
 
                             if (log.isNotBlank()) {
                                 Text(log, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
@@ -509,9 +338,8 @@ class MainActivity : ComponentActivity() {
                                     verticalArrangement = Arrangement.spacedBy(4.dp),
                                 ) {
                                     Text("诊断", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                    val notifOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-                                    Text("无障碍服务：${if (a11y) "已连接" else "未连接"}", fontSize = 11.sp)
-                                    Text("通知权限：${if (notifOn) "已开启" else "未开启"}", fontSize = 11.sp)
+                                    val notifPerm = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+                                    Text("通知权限：${if (notifPerm) "已开启" else "未开启"}", fontSize = 11.sp)
                                     Text(
                                         "定位权限：${if (LocationHelper.hasPermission(ctx)) "已开启" else "未开启"}",
                                         fontSize = 11.sp,

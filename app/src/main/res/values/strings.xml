@@ -1,5 +1,4 @@
 <resources>
-    <!-- App 名：它现在不只天气，还有锁屏卡片和控制中心磁贴 -->
+    <!-- App 名：它不只天气，还有通知栏常驻和三个控制中心磁贴 -->
     <string name="app_name">锁屏快捷台</string>
-    <string name="a11y_desc">在锁屏上显示天气卡片与快捷按钮。无障碍权限只用于把卡片画在锁屏之上，不读取、不记录任何输入内容。</string>
 </resources>
