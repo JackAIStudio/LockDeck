@@ -13,9 +13,16 @@
     <queries>
         <package android:name="com.miui.weather2" />
         <package android:name="com.android.deskclock" />
+        <package android:name="com.tencent.mm" />
+        <package android:name="com.eg.android.AlipayGphone" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- 支付宝扫一扫 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="alipayqr" />
         </intent>
     </queries>
 
@@ -41,7 +48,30 @@
         <activity
             android:name=".PickerActivity"
             android:exported="false"
-            android:label="选择应用" />
+            android:label="选择动作" />
+
+        <!-- 控制中心磁贴：两个槽位，动作在 App 里改 -->
+        <service
+            android:name=".tile.Tile1Service"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_scan_alipay"
+            android:label="磁贴 1"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".tile.Tile2Service"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_scan_wechat"
+            android:label="磁贴 2"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- 从锁屏跳转目标 App 的透明中间页：主动请求解锁，避免"点了要手动上滑" -->
         <activity
@@ -53,6 +83,18 @@
             android:turnScreenOn="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.Transparent" />
+
+        <!-- 天气磁贴：右侧下拉直接看温度 -->
+        <service
+            android:name=".tile.WeatherTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_weather"
+            android:label="天气"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- 刷新：锁屏下可直接触发，不需要解锁 -->
         <receiver

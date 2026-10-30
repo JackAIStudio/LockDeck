@@ -34,6 +34,13 @@ import com.jack.lockscreenweather.data.Weather
  * - 只在「锁屏 + 亮屏」时显示
  * - 解锁后必须立刻移除，否则会盖住系统中的任何界面
  * - FLAG_NOT_FOCUSABLE 保证不抢输入焦点（不能盖住 PIN 键盘）
+ *
+ * 已知限制（HyperOS 3 / Redmi Turbo 5 实测）：
+ * 锁屏状态下 SystemUI 的 NotificationShade 会独占输入焦点（dumpsys input 里
+ * FocusedWindows 一直是 NotificationShade），第三方浮层虽然显示在最上层，
+ * 但收不到任何触摸事件 —— 加 FLAG_TOUCHABLE_WHEN_WAKING 也没用。
+ * 所以这张卡片是「只读展示」：看得到天气，点不动。
+ * 要真正一键直达，用通知栏按钮或控制中心磁贴。
  */
 class LockScreenOverlayService : AccessibilityService() {
 
@@ -180,11 +187,17 @@ class LockScreenOverlayService : AccessibilityService() {
           lastHeartbeat = System.currentTimeMillis()
           runCatching {
             val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-            val awake = pm?.isInteractive == true
+            // isInteractive 在 AOD（息屏显示）下仍是 true，卡片会浮在黑屏上。
+            // 用"屏幕是否处于全亮"再兜一层。
+            val interactive = pm?.isInteractive == true
+            val awake = interactive && !isAodShowing()
             val enabled = Store.isOverlayEnabled(this)
             val locked = isKeyguardLockedNow()
             android.util.Log.i("LSW", "evaluate locked=$locked awake=$awake enabled=$enabled")
 
+            // 必须同时满足：开关开、屏幕亮、确实在锁屏。
+            // awake 里额外排掉 AOD —— isInteractive 在息屏显示下仍为 true，
+            // 只判它会让卡片浮在黑屏上。
             if (enabled && awake && locked) {
                 runCatching { show() }
                     .onFailure { Store.setError(this, "show异常: ${it.javaClass.simpleName}") }
@@ -199,6 +212,19 @@ class LockScreenOverlayService : AccessibilityService() {
           }
         }
     }
+
+    /**
+     * 是否处于 AOD（息屏显示）。
+     *
+     * HyperOS 的 AOD 由 com.miui.aod 绘制，此时 PowerManager.isInteractive 仍为 true，
+     * 但用户看到的是黑底时钟，不该叠我们的卡片。
+     */
+    private fun isAodShowing(): Boolean = runCatching {
+        val ws = windows ?: return@runCatching false
+        ws.any { w ->
+            w.root?.packageName?.toString() == "com.miui.aod" && w.isActive
+        }
+    }.getOrDefault(false)
 
     /**
      * 读取锁屏状态。
@@ -298,7 +324,11 @@ class LockScreenOverlayService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                // 跟 NotificationShade 用同一个标志，让窗口在锁屏亮屏期间也算"可交互"。
+                // 实测（HyperOS 3）这并不能把触摸从 SystemUI 手里抢回来，
+                // 但加上它不影响显示，留着给可能支持该行为的机型。
+                WindowManager.LayoutParams.FLAG_TOUCHABLE_WHEN_WAKING,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -438,37 +468,23 @@ class LockScreenOverlayService : AccessibilityService() {
             }
         }
 
-        // ---- 两个快捷按钮：显示目标 App 的名字 ----
-        bindAppButton(root, R.id.ov_app1_name, R.id.ov_app1_icon, "app1", DEFAULT_APP1, "💬")
-        bindAppButton(root, R.id.ov_app2_name, R.id.ov_app2_icon, "app2", DEFAULT_APP2, "💳")
+        // ---- 两个快捷按钮：显示目标动作的短名字 ----
+        bindAppButton(root, R.id.ov_app1_name, R.id.ov_app1_icon, "app1", DEFAULT_ACTION1)
+        bindAppButton(root, R.id.ov_app2_name, R.id.ov_app2_icon, "app2", DEFAULT_ACTION2)
     }
 
-    /** 把一个按钮的文案换成目标 App 的实际名字 */
+    /** 把一个按钮的文案换成目标动作的短名字 */
     private fun bindAppButton(
         root: View,
         nameId: Int,
         iconId: Int,
         zone: String,
         fallback: String,
-        fallbackIcon: String,
     ) {
-        val pkg = Store.getTarget(this, zone) ?: fallback
-        val label = runCatching {
-            val ai = packageManager.getApplicationInfo(pkg, 0)
-            packageManager.getApplicationLabel(ai).toString()
-        }.getOrNull() ?: "—"
-
-        root.findViewById<TextView>(nameId)?.text = label
-
-        // 已知 App 给个近似的图标；其他用通用图标
-        val icon = when (pkg) {
-            "com.tencent.mm" -> "💬"
-            "com.eg.android.AlipayGphone" -> "💳"
-            "com.android.deskclock" -> "⏰"
-            "com.miui.weather2" -> "☀"
-            else -> fallbackIcon
-        }
-        root.findViewById<TextView>(iconId)?.text = icon
+        val id = Store.getTarget(this, zone) ?: fallback
+        val qa = com.jack.lockscreenweather.action.QuickAction
+        root.findViewById<TextView>(nameId)?.text = qa.shortLabel(this, id)
+        root.findViewById<TextView>(iconId)?.text = qa.glyph(this, id)
     }
 
     /** 长按卡片进入拖动模式，松手后记住位置 */
@@ -514,56 +530,38 @@ class LockScreenOverlayService : AccessibilityService() {
     }
 
     /**
-     * 左右两个大区，各绑一个 App。
-     * 左：用户配置的 main（默认小米天气）
-     * 右：用户配置的 right（默认闹钟）
-     */
-    /**
-     * 三个点击区：
-     *   天气区   -> 天气 App
-     *   按钮1    -> 默认微信
-     *   按钮2    -> 默认支付宝
+     * 三个点击区，各自绑一个动作（见 QuickAction）：
+     *   天气区 -> 默认小米天气
+     *   按钮1  -> 默认支付宝扫一扫
+     *   按钮2  -> 默认微信扫一扫
      * 三者的目标都可以在 App 里改。
      */
     private fun bindClick(v: View) {
         v.findViewById<View>(R.id.ov_zone_weather)?.setOnClickListener {
             android.util.Log.i("LSW", "tap WEATHER")
-            launch(Store.getTarget(this, "main"), WEATHER_PKG)
+            runAction("main", "app:" + WEATHER_PKG)
         }
         v.findViewById<View>(R.id.ov_zone_app1)?.setOnClickListener {
             android.util.Log.i("LSW", "tap APP1")
-            launch(Store.getTarget(this, "app1"), DEFAULT_APP1)
+            runAction("app1", DEFAULT_ACTION1)
         }
         v.findViewById<View>(R.id.ov_zone_app2)?.setOnClickListener {
             android.util.Log.i("LSW", "tap APP2")
-            launch(Store.getTarget(this, "app2"), DEFAULT_APP2)
+            runAction("app2", DEFAULT_ACTION2)
         }
+    }
+
+    /** 用户配了就用用户配的，没配就落到默认动作 */
+    private fun runAction(zone: String, fallback: String) {
+        val id = Store.getTarget(this, zone) ?: fallback
+        android.util.Log.i("LSW", "zone $zone -> $id")
+        com.jack.lockscreenweather.action.ActionRunner.run(this, zone, id)
     }
 
     private companion object {
-        const val WEATHER_PKG = "com.miui.weather2"
-        const val DEFAULT_APP1 = "com.tencent.mm"          // 微信
-        const val DEFAULT_APP2 = "com.eg.android.AlipayGphone" // 支付宝
+        const val WEATHER_PKG = com.jack.lockscreenweather.action.QuickAction.PKG_WEATHER
+        const val DEFAULT_ACTION1 = com.jack.lockscreenweather.action.QuickAction.ALIPAY_SCAN
+        const val DEFAULT_ACTION2 = com.jack.lockscreenweather.action.QuickAction.WECHAT_SCAN
     }
 
-    /**
-     * 打开目标 App。优先用用户配置的包名，失败再回落到默认值。
-     * 从锁屏启动会先要求解锁，这是系统安全策略。
-     */
-    private fun launch(configured: String?, fallback: String) {
-        val candidates = listOfNotNull(configured, fallback, WEATHER_PKG).distinct()
-        val pkg = candidates.firstOrNull { packageManager.getLaunchIntentForPackage(it) != null }
-        if (pkg == null) {
-            android.util.Log.e("LSW", "no target app available")
-            return
-        }
-        android.util.Log.i("LSW", "launch via trampoline -> $pkg")
-        // 走透明中间页：已解锁直接跳，锁着则请求解锁后自动跳，避免"点了不反应"
-        val i = Intent(this, LaunchTrampolineActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(LaunchTrampolineActivity.EXTRA_PKG, pkg)
-        }
-        runCatching { startActivity(i) }
-            .onFailure { android.util.Log.e("LSW", "trampoline failed", it) }
-    }
 }

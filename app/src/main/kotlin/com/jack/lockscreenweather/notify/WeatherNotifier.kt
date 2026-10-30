@@ -13,6 +13,7 @@ import com.jack.lockscreenweather.R
 import com.jack.lockscreenweather.data.LocationHelper
 import com.jack.lockscreenweather.data.Store
 import com.jack.lockscreenweather.data.Weather
+import com.jack.lockscreenweather.action.QuickAction
 import com.jack.lockscreenweather.data.WeatherApi
 
 /**
@@ -47,7 +48,7 @@ object WeatherNotifier {
         existing?.let { nm.deleteNotificationChannel(CHANNEL_ID) }
         val ch = NotificationChannel(
             CHANNEL_ID,
-            "锁屏天气",
+            "锁屏卡片",
             // DEFAULT：能进入锁屏主区域；配合 setSilent(true) 保证不响不震
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
@@ -66,7 +67,7 @@ object WeatherNotifier {
      */
     fun build(ctx: Context, w: Weather?): Notification {
         ensureChannel(ctx)
-        return buildOnChannel(ctx, CHANNEL_ID, ongoing = true, silent = true, w = w)
+        return buildOnChannel(ctx, CHANNEL_ID, ongoing = true, w = w)
     }
 
     /**
@@ -79,7 +80,6 @@ object WeatherNotifier {
         ctx: Context,
         channelId: String,
         ongoing: Boolean,
-        silent: Boolean,
         w: Weather? = Store.loadWeather(ctx),
     ): Notification {
         val title = w?.let { "${it.tempNow}° ${it.description}" } ?: "正在获取天气"
@@ -93,55 +93,92 @@ object WeatherNotifier {
             }
         }
 
-        val contentIntent = targetPendingIntent(ctx, Store.getTarget(ctx, "main") ?: WEATHER, RC_MAIN)
+        val mainAction = Store.getTarget(ctx, "main") ?: QuickAction.openApp(WEATHER)
+        val contentIntent = actionPendingIntent(ctx, mainAction, RC_MAIN)
 
-        // 按钮 1 / 按钮 2 —— 各自打开不同 App，用户可在 App 里改
-        val app1Pkg = Store.getTarget(ctx, "app1") ?: "com.tencent.mm"
-        val app2Pkg = Store.getTarget(ctx, "app2") ?: "com.eg.android.AlipayGphone"
-        val app1Label = labelOf(ctx, app1Pkg, "微信")
-        val app2Label = labelOf(ctx, app2Pkg, "支付宝")
+        // 按钮 1 / 按钮 2 —— 各自跑一个动作，用户可在 App 里改
+        val app1Action = Store.getTarget(ctx, "app1") ?: QuickAction.ALIPAY_SCAN
+        val app2Action = Store.getTarget(ctx, "app2") ?: QuickAction.WECHAT_SCAN
+        val app1Label = QuickAction.shortLabel(ctx, app1Action)
+        val app2Label = QuickAction.shortLabel(ctx, app2Action)
 
-        // 只用系统原生布局。
+        // 两种通知样式，可在 App 里切换：
         //
-        // 实测结论（HyperOS 3 / Redmi Turbo 5）：
-        //   - 系统原生 BigTextStyle  → 稳定置顶，从不折叠；副作用是 action 按钮要点「长按」才出
-        //   - 任意 RemoteViews 自定义 → 一律折叠进「更多通知」，连天气本身都看不见
-        //                              （试过补 setContentTitle/Text 试图救回来，无效；
-        //                                也试过自定义布局 + addAction，照样折叠）
-        // 两者不可兼得。选了"天气一定看得见"，按钮就让用户长按调出。
-        return NotificationCompat.Builder(ctx, channelId)
+        //  A. 系统原生（BigTextStyle）—— 稳定置顶，从不折叠；
+        //     代价是 action 按钮要长按通知才露出来。
+        //  B. 自定义卡片（RemoteViews）—— 天气和两个按钮并排一行，
+        //     左侧下拉一眼就能看到并直接点；代价是 MIUI 有概率把它
+        //     折叠进「更多通知」。实测（HyperOS 3 / Redmi Turbo 5）
+        //     只用最朴素的 LinearLayout + TextView 时不会被折叠。
+        val useCard = Store.isNotifCardEnabled(ctx)
+
+        val builder = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(R.drawable.ic_stat_weather)
             .setContentTitle(title)
             .setContentText(detail)
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
             .setOngoing(ongoing)         // 常驻，划不掉
             .setOnlyAlertOnce(true)      // 刷新时不重复打扰
-            .setSilent(silent)
+            // 不用 setSilent：MIUI 会把 SILENT 的通知统一收进「更多通知」，
+            // 左侧下拉第一屏看不到。静音靠 channel 的 sound=null 实现，效果一样。
+            .setSilent(false)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(contentIntent)
             // 被左滑划掉时立刻重发，做到「划掉也会自己回来」（对齐 Clash Meta 的手感）
             .setDeleteIntent(repostPendingIntent(ctx))
-            .addAction(
+
+        if (useCard) {
+            builder.setCustomContentView(buildCard(ctx, w, app1Action, app2Action, app1Label, app2Label))
+            builder.setCustomBigContentView(buildCard(ctx, w, app1Action, app2Action, app1Label, app2Label))
+        } else {
+            builder.addAction(
                 R.drawable.ic_stat_weather,
                 app1Label,
-                targetPendingIntent(ctx, app1Pkg, RC_APP1),
+                actionPendingIntent(ctx, app1Action, RC_APP1),
             )
-            .addAction(
+            builder.addAction(
                 R.drawable.ic_stat_weather,
                 app2Label,
-                targetPendingIntent(ctx, app2Pkg, RC_APP2),
+                actionPendingIntent(ctx, app2Action, RC_APP2),
             )
+        }
+        return builder
             .build()
     }
 
-    /** 取 App 显示名，拿不到就用兜底文案 */
-    private fun labelOf(ctx: Context, pkg: String, fallback: String): String =
-        runCatching {
-            val ai = ctx.packageManager.getApplicationInfo(pkg, 0)
-            ctx.packageManager.getApplicationLabel(ai).toString()
-        }.getOrNull() ?: fallback
+    /** 自定义通知卡片的 RemoteViews */
+    private fun buildCard(
+        ctx: Context,
+        w: Weather?,
+        app1Action: String,
+        app2Action: String,
+        app1Label: String,
+        app2Label: String,
+    ): android.widget.RemoteViews {
+        val rv = android.widget.RemoteViews(ctx.packageName, R.layout.notif_weather_card)
+        rv.setTextViewText(R.id.n_icon, w?.icon ?: "…")
+        rv.setTextViewText(R.id.n_temp, w?.let { "${it.tempNow}°" } ?: "--°")
+        rv.setTextViewText(R.id.n_desc, w?.description ?: "获取中")
+        rv.setTextViewText(
+            R.id.n_sub,
+            if (w == null) {
+                "点开可手动刷新"
+            } else {
+                val parts = mutableListOf<String>()
+                parts.add("${w.tempMin}°~${w.tempMax}°")
+                if (w.rainChance >= 0) parts.add("降雨 ${w.rainChance}%")
+                if (w.city.isNotBlank()) parts.add(w.city)
+                parts.joinToString(" · ")
+            },
+        )
+        rv.setTextViewText(R.id.n_btn1, app1Label)
+        rv.setTextViewText(R.id.n_btn2, app2Label)
+        rv.setOnClickPendingIntent(R.id.n_btn1, actionPendingIntent(ctx, app1Action, RC_APP1))
+        rv.setOnClickPendingIntent(R.id.n_btn2, actionPendingIntent(ctx, app2Action, RC_APP2))
+        return rv
+    }
 
     fun show(ctx: Context, w: Weather?) {
         if (!Store.isEnabled(ctx)) return
@@ -156,12 +193,18 @@ object WeatherNotifier {
 
     // ---------------------------------------------------------------- intents
 
-    /** 打开某个包；包不存在就回落到天气 App；都不存在则取消。 */
-    private fun targetPendingIntent(ctx: Context, pkg: String, requestCode: Int): PendingIntent {
-        val intent = ctx.packageManager.getLaunchIntentForPackage(pkg)
-            ?: ctx.packageManager.getLaunchIntentForPackage(WEATHER)
-            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.mi.com"))
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    /**
+     * 把动作包成 PendingIntent。
+     *
+     * 注意：这里必须走 LaunchTrampolineActivity，不能直接把 Intent 塞进
+     * PendingIntent.getActivity —— 从锁屏点通知时系统会挂起这个启动，
+     * 用户得自己上滑，看起来就像"点了没反应"。
+     */
+    private fun actionPendingIntent(ctx: Context, actionId: String, requestCode: Int): PendingIntent {
+        val intent = Intent(ctx, com.jack.lockscreenweather.overlay.LaunchTrampolineActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(com.jack.lockscreenweather.overlay.LaunchTrampolineActivity.EXTRA_ACTION, actionId)
+        }
         return PendingIntent.getActivity(
             ctx, requestCode, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,

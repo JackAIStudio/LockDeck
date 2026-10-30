@@ -39,12 +39,30 @@ object Store {
     }
 
     // ---- 点击区绑定 ----
-    // zone: main / left / right  →  package name（空 = 用默认天气 App）
+    // zone: main / app1 / app2  →  action id（见 QuickAction）
+    // 空 = 该区域不响应
     fun getTarget(ctx: Context, zone: String): String? =
         sp(ctx).getString("tgt_$zone", null)
 
-    fun setTarget(ctx: Context, zone: String, pkg: String?) {
-        sp(ctx).edit().apply { if (pkg.isNullOrBlank()) remove("tgt_$zone") else putString("tgt_$zone", pkg) }.apply()
+    fun setTarget(ctx: Context, zone: String, id: String?) {
+        sp(ctx).edit().apply { if (id.isNullOrBlank()) remove("tgt_$zone") else putString("tgt_$zone", id) }.apply()
+    }
+
+    // ---- 控制中心磁贴 ----
+    fun getTileAction(ctx: Context, slot: Int): String =
+        sp(ctx).getString("tile_$slot", null) ?: defaultTileAction(slot)
+
+    fun setTileAction(ctx: Context, slot: Int, id: String?) {
+        sp(ctx).edit().apply {
+            if (id.isNullOrBlank()) remove("tile_$slot") else putString("tile_$slot", id)
+        }.apply()
+    }
+
+    /** 磁贴 1 / 2 的出厂默认：支付宝扫一扫、微信扫一扫 */
+    fun defaultTileAction(slot: Int): String = when (slot) {
+        1 -> com.jack.lockscreenweather.action.QuickAction.ALIPAY_SCAN
+        2 -> com.jack.lockscreenweather.action.QuickAction.WECHAT_SCAN
+        else -> com.jack.lockscreenweather.action.QuickAction.ALIPAY_SCAN
     }
 
     // ---- 卡片开关 ----
@@ -88,6 +106,11 @@ object Store {
     fun isRainHintEnabled(ctx: Context): Boolean = sp(ctx).getBoolean("rainHint", true)
     fun setRainHintEnabled(ctx: Context, on: Boolean) =
         sp(ctx).edit().putBoolean("rainHint", on).apply()
+
+    // ---- 通知栏用自定义卡片（而不是系统原生样式）----
+    fun isNotifCardEnabled(ctx: Context): Boolean = sp(ctx).getBoolean("notifCard", true)
+    fun setNotifCardEnabled(ctx: Context, on: Boolean) =
+        sp(ctx).edit().putBoolean("notifCard", on).apply()
 
     // ---- 卡片是否已被用户手动定位过 ----
     fun hasCustomY(ctx: Context): Boolean = sp(ctx).getBoolean("ovYCustom", false)

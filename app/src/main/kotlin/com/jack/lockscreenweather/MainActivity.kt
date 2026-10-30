@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
+import com.jack.lockscreenweather.action.QuickAction
 import com.jack.lockscreenweather.data.LocationHelper
 import com.jack.lockscreenweather.data.Store
 import com.jack.lockscreenweather.notify.WeatherNotifier
@@ -98,9 +99,9 @@ class MainActivity : ComponentActivity() {
                                 .padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            Text("Lock screen widget", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                            Text("锁屏快捷台", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                "在锁屏的通知区域常驻显示当前温度与今日最高/最低。",
+                                "锁屏卡片：天气 + 两个自定义按钮；控制中心：两个自定义磁贴。",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -287,11 +288,44 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            Text("点击区域绑定", fontWeight = FontWeight.Medium)
+                            // ---------- 通知栏样式 ----------
+                            var notifCard by remember { mutableStateOf(Store.isNotifCardEnabled(ctx)) }
+                            Card {
+                                Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text("通知栏用自定义卡片", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                            Text(
+                                                "一行放下天气 + 两个按钮，点一下就扫。关掉则用系统原生样式。",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        Switch(
+                                            checked = notifCard,
+                                            onCheckedChange = {
+                                                notifCard = it
+                                                Store.setNotifCardEnabled(ctx, it)
+                                                WeatherNotifier.show(ctx, Store.loadWeather(ctx))
+                                                log = if (it) "通知栏已改为自定义卡片" else "通知栏已改回系统样式"
+                                            },
+                                        )
+                                    }
+                                    Text(
+                                        "注：MIUI 会把不打扰的常驻通知折叠进「更多通知」，两种样式都一样。" +
+                                            "左侧下拉第一屏能不能看到，取决于系统，App 改不了。",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+
+                            Text("卡片按钮绑定", fontWeight = FontWeight.Medium)
                             TargetRow(
                                 title = "天气区",
-                                desc = "点天气 -> 打开",
-                                current = Store.getTarget(ctx, "main") ?: WeatherNotifier.WEATHER,
+                                desc = "点温度那里 -> 运行",
+                                current = Store.getTarget(ctx, "main")
+                                    ?: QuickAction.openApp(QuickAction.PKG_WEATHER),
                                 onPick = {
                                     ctx.startActivity(
                                         Intent(ctx, PickerActivity::class.java).putExtra("zone", "main")
@@ -299,9 +333,9 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                             TargetRow(
-                                title = "快捷按钮 1",
-                                desc = "点这里 -> 打开（默认微信）",
-                                current = Store.getTarget(ctx, "app1") ?: "com.tencent.mm",
+                                title = "卡片按钮 1",
+                                desc = "锁屏卡片左按钮 -> 运行",
+                                current = Store.getTarget(ctx, "app1") ?: QuickAction.ALIPAY_SCAN,
                                 onPick = {
                                     ctx.startActivity(
                                         Intent(ctx, PickerActivity::class.java).putExtra("zone", "app1")
@@ -309,15 +343,71 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                             TargetRow(
-                                title = "快捷按钮 2",
-                                desc = "点这里 -> 打开（默认支付宝）",
-                                current = Store.getTarget(ctx, "app2") ?: "com.eg.android.AlipayGphone",
+                                title = "卡片按钮 2",
+                                desc = "锁屏卡片右按钮 -> 运行",
+                                current = Store.getTarget(ctx, "app2") ?: QuickAction.WECHAT_SCAN,
                                 onPick = {
                                     ctx.startActivity(
                                         Intent(ctx, PickerActivity::class.java).putExtra("zone", "app2")
                                     )
                                 },
                             )
+
+                            Text("控制中心磁贴", fontWeight = FontWeight.Medium)
+                            Text(
+                                "下拉控制中心 -> 点「编辑」-> 把「天气 / 磁贴 1 / 磁贴 2」拖到上面。" +
+                                    "HyperOS 的磁贴只显示图标，不显示文字。",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TargetRow(
+                                title = "磁贴 1",
+                                desc = "控制中心点它 -> 运行",
+                                current = Store.getTileAction(ctx, 1),
+                                onPick = {
+                                    ctx.startActivity(
+                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "tile1")
+                                    )
+                                },
+                            )
+                            TargetRow(
+                                title = "磁贴 2",
+                                desc = "控制中心点它 -> 运行",
+                                current = Store.getTileAction(ctx, 2),
+                                onPick = {
+                                    ctx.startActivity(
+                                        Intent(ctx, PickerActivity::class.java).putExtra("zone", "tile2")
+                                    )
+                                },
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    // 系统只允许应用主动请求添加一次（Android 13+）。
+                                    // HyperOS 上系统弹窗不一定出现，所以失败时给手动路径。
+                                    val ok = runCatching {
+                                        val sbm = ctx.getSystemService(android.app.StatusBarManager::class.java)
+                                        sbm?.requestAddTileService(
+                                            android.content.ComponentName(
+                                                ctx,
+                                                com.jack.lockscreenweather.tile.Tile1Service::class.java,
+                                            ),
+                                            "磁贴 1",
+                                            android.graphics.drawable.Icon.createWithResource(
+                                                ctx,
+                                                R.drawable.ic_tile_scan_alipay,
+                                            ),
+                                            ctx.mainExecutor,
+                                        ) { _ -> }
+                                        sbm != null
+                                    }.getOrDefault(false)
+                                    log = if (ok) {
+                                        "系统弹出确认框时点「添加」；之后可下拉控制中心 -> 编辑 调整位置"
+                                    } else {
+                                        "请下拉控制中心 -> 点「编辑」-> 把「磁贴 1 / 磁贴 2」拖到上面"
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("把磁贴 1 添加到控制中心") }
 
                             HorizontalDivider()
 
@@ -334,7 +424,7 @@ class MainActivity : ComponentActivity() {
                                             Store.bumpOverlayRefresh(ctx)
                                             log = "已通知卡片刷新"
                                         } else {
-                                            log = "请先开启锁屏天气卡片"
+                                            log = "请先开启锁屏卡片"
                                         }
                                     },
                                     modifier = Modifier.weight(1f),
@@ -419,7 +509,7 @@ private fun TargetRow(
                 Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Text(desc, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    if (current == "__refresh__") "刷新（内置）" else current,
+                    LocalContext.current.let { QuickAction.label(it, current) },
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.primary,
                 )

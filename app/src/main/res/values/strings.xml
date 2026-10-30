@@ -1,4 +1,5 @@
 <resources>
-    <string name="app_name">Lock screen widget</string>
-    <string name="a11y_desc">Show widgets on the lock screen. Accessibility permission is used only to draw the card above the lock screen; no input is read or recorded.</string>
+    <!-- App 名：它现在不只天气，还有锁屏卡片和控制中心磁贴 -->
+    <string name="app_name">锁屏快捷台</string>
+    <string name="a11y_desc">在锁屏上显示天气卡片与快捷按钮。无障碍权限只用于把卡片画在锁屏之上，不读取、不记录任何输入内容。</string>
 </resources>

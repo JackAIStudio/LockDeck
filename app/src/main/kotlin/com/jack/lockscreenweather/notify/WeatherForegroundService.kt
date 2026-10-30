@@ -49,21 +49,22 @@ class WeatherForegroundService : Service() {
     }
 
     companion object {
-        const val CHANNEL_ID = "lsw_fg_v1"
+        const val CHANNEL_ID = "lsw_fg_v4"
         const val NOTIF_ID = 1002
 
         fun ensureChannel(ctx: Context) {
             val nm = ctx.getSystemService(NotificationManager::class.java)
             val existing = nm.getNotificationChannel(CHANNEL_ID)
-            // 照抄 Clash 低 importance：LOW(2)。实测 Clash 用 LOW 也能上锁屏。
-            if (existing != null && existing.importance == NotificationManager.IMPORTANCE_LOW) return
+            // 用 DEFAULT(3)：LOW(2) 会被 MIUI 统一收进「更多通知」，
+            // 左侧下拉第一屏根本看不到。DEFAULT + setSilent(true) 同样不响不震。
+            if (existing != null && existing.importance == NotificationManager.IMPORTANCE_DEFAULT) return
             existing?.let { nm.deleteNotificationChannel(CHANNEL_ID) }
             val ch = NotificationChannel(
                 CHANNEL_ID,
-                "锁屏天气（常驻）",
-                NotificationManager.IMPORTANCE_LOW,
+                "锁屏卡片（常驻）",
+                NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
-                description = "在锁屏常驻显示当前天气"
+                description = "在锁屏与通知栏常驻显示当前天气"
                 setShowBadge(false)
                 enableVibration(false)
                 setSound(null, null)
@@ -73,7 +74,7 @@ class WeatherForegroundService : Service() {
         }
 
         fun buildNotification(ctx: Context): Notification =
-            WeatherNotifier.buildOnChannel(ctx, CHANNEL_ID, ongoing = true, silent = true)
+            WeatherNotifier.buildOnChannel(ctx, CHANNEL_ID, ongoing = true)
 
         fun start(ctx: Context) {
             runCatching {
@@ -92,12 +93,14 @@ class WeatherForegroundService : Service() {
 
         fun refresh(ctx: Context, w: com.jack.lockscreenweather.data.Weather?) {
             if (!Store.isEnabled(ctx)) return
+            // 渠道必须先建好，否则 notify 会报 "No Channel found" 静默失败
+            ensureChannel(ctx)
             // 关键：先把服务拉起来（服务没起来时 notify 出来的只是普通通知，
             // 没有 FOREGROUND_SERVICE 标志，HyperOS 锁屏不会展示）。
             start(ctx)
             runCatching {
                 val n = WeatherNotifier.buildOnChannel(
-                    ctx, CHANNEL_ID, ongoing = true, silent = true, w = w
+                    ctx, CHANNEL_ID, ongoing = true, w = w
                 )
                 ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, n)
             }

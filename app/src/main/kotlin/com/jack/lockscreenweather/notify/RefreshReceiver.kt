@@ -25,9 +25,14 @@ class RefreshReceiver : BroadcastReceiver() {
             }
 
             ACTION_REPOST -> {
-                // 被左滑划掉了：用户明确想让它消失一会儿的话，
-                // 这里的立即重发会显得很顽固，所以只重发一次，不做循环重试。
-                WeatherNotifier.show(ctx, Store.loadWeather(ctx))
+                // 被左滑划掉了：只补发一次，不做循环重试。
+                //
+                // 不能走 WeatherNotifier.show()：它内部还会再判一次开关，
+                // 而且当时是为了「常驻通知」这条链路写的。
+                // 这里直接叫前台服务重挂，开关由调用方判一次就够。
+                if (Store.isEnabled(ctx)) {
+                    WeatherForegroundService.refresh(ctx, Store.loadWeather(ctx))
+                }
             }
         }
     }

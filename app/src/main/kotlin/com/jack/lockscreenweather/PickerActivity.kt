@@ -25,14 +25,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jack.lockscreenweather.action.QuickAction
 import com.jack.lockscreenweather.data.Store
 import com.jack.lockscreenweather.notify.WeatherNotifier
 import com.jack.lockscreenweather.ui.theme.LockScreenWeatherTheme
 
-/** 选择某个点击区要打开哪个应用。 */
+/**
+ * 选择某个点击区（或磁贴）要跑哪个动作。
+ *
+ * 分两段：
+ *   1. 内置动作 —— 支付宝扫一扫、微信扫一扫这类一步到位的
+ *   2. 任意 App  —— 从已安装应用里挑一个
+ */
 class PickerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // zone 可能是 main / app1 / app2，也可能是 tile1 / tile2
         val zone = intent.getStringExtra("zone") ?: "main"
         enableEdgeToEdge()
         setContent {
@@ -53,12 +61,36 @@ class PickerActivity : ComponentActivity() {
                             .sortedBy { it.second }
                     }
 
+                    fun save(id: String?) {
+                        if (zone.startsWith("tile")) {
+                            Store.setTileAction(ctx, zone.removePrefix("tile").toIntOrNull() ?: 1, id)
+                            // 通知系统磁贴状态变了
+                            runCatching {
+                                ctx.sendBroadcast(
+                                    Intent("android.service.quicksettings.action.REQUEST_LISTENING").setPackage(ctx.packageName)
+                                )
+                            }
+                        } else {
+                            Store.setTarget(ctx, zone, id)
+                            WeatherNotifier.show(ctx, Store.loadWeather(ctx))
+                        }
+                        startActivity(Intent(ctx, MainActivity::class.java))
+                        finish()
+                    }
+
                     Scaffold(
                         topBar = {
                             Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                                Text("选择应用", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                Text("选择动作", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "绑到：${if (zone == "main") "主区域" else "右下区域"}",
+                                    when {
+                                        zone == "main" -> "绑到：锁屏卡片 · 天气区"
+                                        zone == "app1" -> "绑到：锁屏卡片 · 按钮 1"
+                                        zone == "app2" -> "绑到：锁屏卡片 · 按钮 2"
+                                        zone == "tile1" -> "绑到：控制中心 · 磁贴 1"
+                                        zone == "tile2" -> "绑到：控制中心 · 磁贴 2"
+                                        else -> "绑到：$zone"
+                                    },
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -68,27 +100,52 @@ class PickerActivity : ComponentActivity() {
                         LazyColumn(Modifier.fillMaxSize().padding(pad)) {
                             item {
                                 ListItem(
-                                    headlineContent = { Text("使用默认（天气 / 闹钟）") },
-                                    supportingContent = { Text("恢复系统默认行为") },
-                                    modifier = Modifier.clickable {
-                                        Store.setTarget(ctx, zone, null)
-                                        WeatherNotifier.show(ctx, Store.loadWeather(ctx))
-                                        startActivity(Intent(ctx, MainActivity::class.java))
-                                        finish()
-                                    },
+                                    headlineContent = { Text("不绑定") },
+                                    supportingContent = { Text("这一格不做任何事") },
+                                    modifier = Modifier.clickable { save(null) },
                                 )
                                 HorizontalDivider()
+                            }
+                            item {
+                                Text(
+                                    "内置动作",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 6.dp),
+                                )
+                            }
+                            items(QuickAction.presets) { id ->
+                                ListItem(
+                                    headlineContent = { Text(QuickAction.label(ctx, id)) },
+                                    supportingContent = {
+                                        Text(
+                                            when {
+                                                id == QuickAction.REFRESH -> "立即拉一次最新天气"
+                                                QuickAction.isAvailable(ctx, id) -> "点一下直达，不用先开 App"
+                                                else -> "这台机器上没装"
+                                            },
+                                            fontSize = 10.sp,
+                                        )
+                                    },
+                                    modifier = Modifier.clickable { save(id) },
+                                )
+                                HorizontalDivider()
+                            }
+                            item {
+                                Text(
+                                    "任意 App",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 6.dp),
+                                )
                             }
                             items(apps) { (pkg, label) ->
                                 ListItem(
                                     headlineContent = { Text(label) },
                                     supportingContent = { Text(pkg, fontSize = 10.sp) },
-                                    modifier = Modifier.clickable {
-                                        Store.setTarget(ctx, zone, pkg)
-                                        WeatherNotifier.show(ctx, Store.loadWeather(ctx))
-                                        startActivity(Intent(ctx, MainActivity::class.java))
-                                        finish()
-                                    },
+                                    modifier = Modifier.clickable { save(QuickAction.openApp(pkg)) },
                                 )
                                 HorizontalDivider()
                             }
