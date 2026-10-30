@@ -43,6 +43,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.jack.lockdeck.action.QuickAction
 import com.jack.lockdeck.data.LocationHelper
 import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.notify.WeatherForegroundService
 import com.jack.lockdeck.notify.WeatherNotifier
 import com.jack.lockdeck.notify.WeatherWorker
 import com.jack.lockdeck.ui.theme.LockDeckTheme
@@ -112,7 +113,7 @@ class MainActivity : ComponentActivity() {
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("锁屏小组件", fontWeight = FontWeight.Medium)
+                                    Text("锁屏卡片", fontWeight = FontWeight.Medium)
                                         Text(
                                             when {
                                                 !enabled -> "未开启"
@@ -283,6 +284,47 @@ class MainActivity : ComponentActivity() {
                                             Store.setRainHintEnabled(ctx, it)
                                             Store.bumpOverlayRefresh(ctx)
                                             log = if (it) "已开启降雨提示" else "已关闭降雨提示"
+                                        },
+                                    )
+                                }
+                            }
+
+                            // ---------- 通知栏常驻卡片 ----------
+                            // 开关只留一个：之前通知开了却看不到，是因为
+                            // 界面上根本没有「发通知」的开关，Store.setEnabled 从来没有调用点。
+                            var notifOn by remember { mutableStateOf(Store.isEnabled(ctx)) }
+                            Card {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("通知栏常驻天气", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                        Text(
+                                            "解锁后左侧下拉第一屏显示天气和两个「扫一扫」按钮",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Switch(
+                                        checked = notifOn,
+                                        onCheckedChange = { on ->
+                                            notifOn = on
+                                            Store.setEnabled(ctx, on)
+                                            if (on) {
+                                                permsLauncher.launch(
+                                                    arrayOf(Manifest.permission.POST_NOTIFICATIONS)
+                                                )
+                                                WeatherWorker.schedule(ctx)
+                                                WeatherWorker.enqueueNow(ctx)
+                                                WeatherForegroundService.refresh(ctx, Store.loadWeather(ctx))
+                                                log = "已开启通知栏天气，稍等几秒出现"
+                                            } else {
+                                                WeatherNotifier.cancel(ctx)
+                                                WeatherForegroundService.stop(ctx)
+                                                if (!Store.isOverlayEnabled(ctx)) WeatherWorker.cancel(ctx)
+                                                log = "已关闭通知栏天气"
+                                            }
                                         },
                                     )
                                 }
