@@ -75,6 +75,14 @@ object LocationHelper {
      */
     private const val SAME_PLACE_M = 200.0
 
+    /**
+     * 收到第一个定位回调后再等多久，让更准的 provider 覆盖旧缓存。
+     *
+     * 800ms 是折中：network 的旧点通常几毫秒就回放完，gps/fused 一般
+     * 几十到几百毫秒内跟上。等太久会让「立即刷新」变慢，等太短又抓不到新的。
+     */
+    private const val SETTLE_MS = 800L
+
     fun hasPermission(ctx: Context): Boolean =
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED ||
@@ -202,15 +210,32 @@ object LocationHelper {
      * 用 CountDownLatch 而不是 getCurrentLocation：后者在部分国产 ROM 上
      * 回调可能不触发（也不报错），表现就是卡住；这里用超时兜住，
      * 最坏情况是等 8 秒然后返回 null，不会把刷新流程拖死。
+     *
+     * ## 为什么不能「第一个回调就收工」
+     *
+     * 这是真机踩出来的坑：同时挂 network / fused / gps 之后，
+     * **network provider 会先把缓存里的旧位置回放一遍**（它更新得慢，
+     * 但一被订阅就立刻吐一个 lastKnown）。于是第一个回调往往是几小时前的点，
+     * 主线程这边一看「来了」就收工，拿到的是老位置——
+     * 表现就是「人已经在乐清了，天气还是温州的」，而诊断里显示的坐标却
+     * 是那次调用之后才写进去的新值，看起来像反查在乱报城市。
+     *
+     * 现在改成：
+     *  - 收到回调先比 `location.time`，比已有的旧就不要
+     *  - 首个回调到达后**再等一小会儿**（[SETTLE_MS]），让更准的 provider
+     *    （通常是 gps/fused）有机会覆盖
+     *  - 超时仍然用手上最好的那个，不会因为等不到而白跑
      */
     @SuppressLint("MissingPermission")
     private fun requestOnce(lm: LocationManager): Fix? {
         val latch = java.util.concurrent.CountDownLatch(1)
-        var result: Location? = null
+        val got = java.util.concurrent.atomic.AtomicReference<Location?>(null)
 
         val listener = object : android.location.LocationListener {
             override fun onLocationChanged(location: Location) {
-                if (result == null) result = location
+                val cur = got.get()
+                // 只接受比手上更新的，避免旧缓存把好位置顶掉
+                if (cur == null || location.time >= cur.time) got.set(location)
                 latch.countDown()
             }
             override fun onProviderEnabled(provider: String) {}
@@ -220,22 +245,26 @@ object LocationHelper {
         }
 
         val main = android.os.Looper.getMainLooper()
-        // 同时在所有可用 provider 上挂监听，谁先给就用谁的。
-        // 只挂 network 的话，纯 GPS 环境（户外、没网）永远等不到；
-        // 只挂 gps 的话，室内永远等不到。两个一起挂，8 秒内谁先来算谁的。
-        val registered = mutableListOf<String>()
+        // 同时在所有可用 provider 上挂监听：室内靠 network/fused，户外靠 gps，
+        // 只挂一个的话总有一种环境永远等不到。
         for (provider in activeProviders(lm)) {
-            val ok = runCatching {
-                lm.requestLocationUpdates(provider, 0L, 0f, listener, main)
-                true
-            }.getOrDefault(false)
-            if (ok) registered += provider
+            runCatching { lm.requestLocationUpdates(provider, 0L, 0f, listener, main) }
         }
 
-        latch.await(ACTIVE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-        runCatching { lm.removeUpdates(listener) }
+        try {
+            // 先等第一个回调（最多 ACTIVE_TIMEOUT_MS）
+            if (!latch.await(ACTIVE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                return null
+            }
+            // 再给更准的 provider 一点时间覆盖掉旧缓存
+            Thread.sleep(SETTLE_MS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally {
+            runCatching { lm.removeUpdates(listener) }
+        }
 
-        return result?.let { Fix(it.latitude, it.longitude, it.time) }
+        return got.get()?.let { Fix(it.latitude, it.longitude, it.time) }
     }
 
     // ---- 「上次成功定位」持久化 ----

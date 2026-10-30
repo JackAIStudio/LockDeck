@@ -24,6 +24,7 @@ object Store {
             .putInt("code", w.weatherCode)
             .putBoolean("day", w.isDay)
             .putString("city", w.city)
+            .putString("district", w.district)
             .putString("text", w.text)
             .putLong("at", w.updatedAt)
             .apply()
@@ -39,6 +40,7 @@ object Store {
             weatherCode = p.getInt("code", 0),
             isDay = p.getBoolean("day", true),
             city = p.getString("city", "").orEmpty(),
+            district = p.getString("district", "").orEmpty(),
             updatedAt = p.getLong("at", 0),
             text = p.getString("text", "").orEmpty(),
         )

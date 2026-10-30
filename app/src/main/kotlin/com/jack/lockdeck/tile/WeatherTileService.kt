@@ -84,7 +84,7 @@ class WeatherTileService : TileService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 tile.subtitle = buildString {
                     append(w.tempMin).append("°~").append(w.tempMax).append("°")
-                    if (w.city.isNotBlank()) append(" · ").append(w.city)
+                    if (w.place.isNotBlank()) append(" · ").append(w.place)
                 }
             }
             // 关键：温度画进位图。HyperOS 只认图标这一层。

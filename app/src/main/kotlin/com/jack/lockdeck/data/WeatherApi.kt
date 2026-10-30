@@ -90,6 +90,9 @@ object WeatherApi {
             weatherCode = code,
             isDay = runCatching { isDaytime() }.getOrDefault(true),
             city = stationName.ifBlank { place.city },
+            // 反查到的区县名跟着存下来：界面优先显示它（鹿城区），
+            // 这样和手机自带天气的地名一致，不会因为「共用市级站」而显示成一个大市名
+            district = place.district,
             updatedAt = System.currentTimeMillis(),
             text = text,
         )

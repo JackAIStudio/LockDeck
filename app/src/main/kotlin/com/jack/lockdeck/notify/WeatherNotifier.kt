@@ -111,7 +111,7 @@ object WeatherNotifier {
         } else {
             buildString {
                 append("今日 ${w.tempMin}°~${w.tempMax}°")
-                if (w.city.isNotBlank()) append(" · ").append(w.city)
+                if (w.place.isNotBlank()) append(" · ").append(w.place)
             }
         }
 

@@ -137,7 +137,7 @@ class MainActivity : ComponentActivity() {
                                             )
                                             Text(
                                                 weather?.let {
-                                                    it.description + if (it.city.isNotBlank()) " · ${it.city}" else ""
+                                                    it.description + if (it.place.isNotBlank()) " · ${it.place}" else ""
                                                 } ?: "正在获取天气",
                                                 fontSize = 12.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -201,7 +201,7 @@ class MainActivity : ComponentActivity() {
                                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                     Text("刷新间隔：$interval 分钟", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     Text(
-                                        "Open-Meteo 免费额度充足，5~10 分钟都行",
+                                        "中央气象台观测站数据，免费无需 key；观测站约每 10 分钟更新一次",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
