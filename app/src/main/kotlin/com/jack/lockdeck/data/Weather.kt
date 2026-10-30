@@ -1,90 +1,78 @@
 package com.jack.lockdeck.data
 
-/** 一条天气快照。字段全部来自 Open-Meteo 当前+当日预报。 */
+/**
+ * 一条天气快照。
+ *
+ * 数据来自中央气象台（weather.cma.cn）的观测站。和以前用 Open-Meteo
+ * 的全球模式插值不同，这是**当地气象站实测**，所以能和手机自带天气对上。
+ */
 data class Weather(
     val tempNow: Int,
     val tempMax: Int,
     val tempMin: Int,
+    /** 中央气象台自己的天气代码（0 晴 / 1 多云 / 2 阴 / 7 小雨 / 14 小雪…），只给图标兜底用 */
     val weatherCode: Int,
     val isDay: Boolean,
+    /** 气象站名（温州 / 鹿城 / 乐清…），不是「市」 */
     val city: String,
     val updatedAt: Long,
-    /** 今日降水概率（%），没有数据时为 -1 */
-    val rainChance: Int = -1,
-    /** 未来 1 小时降水概率（%），用来提示"马上要下雨" */
-    val rainChanceNextHour: Int = -1,
+    /**
+     * 天气描述，直接取中央气象台返回的中文（「多云」「小雨」）。
+     *
+     * 以前是自己把 WMO 代码翻译成中文。换成中央气象台后它给的 code 不是 WMO
+     * 那一套（0 晴、1 多云、7 小雨，和 WMO 的 0/3/61 完全不同），
+     * 硬套会显示错词。接口本来就带中文，直接用，不维护第二张表。
+     */
+    val text: String = "",
 ) {
-    /** WMO 天气代码 → 简短中文描述 */
+    /** 简短中文描述 */
     val description: String
-        get() = when (weatherCode) {
+        get() = if (text.isNotBlank()) text else when (weatherCode) {
             0 -> "晴"
-            1 -> "晴间多云"
-            2 -> "多云"
-            3 -> "阴"
-            45, 48 -> "雾"
-            51, 53, 55 -> "毛毛雨"
-            56, 57 -> "冻雨"
-            61 -> "小雨"
-            63 -> "中雨"
-            65 -> "大雨"
-            66, 67 -> "冻雨"
-            71 -> "小雪"
-            73 -> "中雪"
-            75 -> "大雪"
-            77 -> "雪粒"
-            80, 81 -> "阵雨"
-            82 -> "强阵雨"
-            85, 86 -> "阵雪"
-            95 -> "雷阵雨"
-            96, 99 -> "雷暴冰雹"
+            1 -> "多云"
+            2 -> "阴"
+            3, 4 -> "阵雨"
+            7 -> "小雨"
+            8, 9, 10 -> "中到大雨"
+            13 -> "阵雪"
+            14 -> "小雪"
+            15 -> "大雪"
             else -> "—"
         }
 
     /** 天气图标（emoji，不依赖图片资源） */
     val icon: String
-        get() = when (weatherCode) {
-            0 -> if (isDay) "☀" else "☾"
-            1 -> if (isDay) "🌤" else "☾"
-            2 -> "⛅"
-            3 -> "☁"
-            45, 48 -> "🌫"
-            in 51..57 -> "🌦"
-            in 61..67, in 80..82 -> "🌧"
-            in 71..77, in 85..86 -> "🌨"
-            in 95..99 -> "⛈"
-            else -> "—"
-        }
-
-    /**
-     * 是否要提示带伞。
-     * 优先看未来一小时；没有就用全天概率。
-     */
-    val umbrellaHint: String?
         get() {
-            val hour = rainChanceNextHour
-            val day = rainChance
+            val d = description
             return when {
-                hour >= 50 -> "1小时内可能下雨 · 带伞"
-                hour in 20..49 -> "1小时内可能有雨"
-                hour < 0 && day >= 60 -> "今日降水概率 $day% · 带伞"
-                day in 30..59 -> "今日降水概率 $day%"
-                else -> null
-            }
-        }
-
-    /** 降雨风险等级：0 无 / 1 低 / 2 中 / 3 高 */
-    val rainLevel: Int
-        get() {
-            val v = if (rainChanceNextHour >= 0) rainChanceNextHour else rainChance
-            return when {
-                v < 0 -> 0
-                v >= 60 -> 3
-                v >= 30 -> 2
-                v >= 10 -> 1
-                else -> 0
+                d.contains("雷") -> "⛈"
+                d.contains("雪") -> "🌨"
+                d.contains("雨") -> "🌧"
+                d.contains("雾") || d.contains("霾") -> "🌫"
+                d.contains("阴") -> "☁"
+                d.contains("多云") -> if (isDay) "⛅" else "☁"
+                d.contains("晴") -> if (isDay) "☀" else "☾"
+                else -> "☁"
             }
         }
 }
 
-/** 城市解析结果，失败时降级为坐标 */
-data class Place(val name: String)
+/**
+ * 地名解析结果。
+ *
+ * 分成市和区县两级，是因为气象站是按区县分布的
+ * （温州 58659、乐清 58656、瑞安 58752…）。有了区县名就能挑到更近的站，
+ * 而不是永远用市中心那个站。
+ */
+data class Place(
+    /** 地级市，如「温州市」 */
+    val city: String = "",
+    /** 区县，如「鹿城区」 */
+    val district: String = "",
+    /** 省，如「浙江省」，用来在省站表里查站号 */
+    val province: String = "",
+) {
+    /** 显示用：有区县优先区县，否则市 */
+    val display: String
+        get() = district.ifBlank { city }
+}

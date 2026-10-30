@@ -4,6 +4,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!--
+        后台定位。Android 10+ 单独一档，用户要在系统设置里选「始终允许」。
+
+        为什么必须要它：天气是 WorkManager 在后台定时刷的，那时没有前台界面，
+        只有前台定位权限的话系统会静默拒绝请求，拿到的永远是 null——
+        这正是「前台刷新是温州、过一会儿变成别的地方」的根源。
+    -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

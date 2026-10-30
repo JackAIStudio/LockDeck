@@ -24,9 +24,8 @@ object Store {
             .putInt("code", w.weatherCode)
             .putBoolean("day", w.isDay)
             .putString("city", w.city)
+            .putString("text", w.text)
             .putLong("at", w.updatedAt)
-            .putInt("rainDay", w.rainChance)
-            .putInt("rainHour", w.rainChanceNextHour)
             .apply()
     }
 
@@ -41,8 +40,7 @@ object Store {
             isDay = p.getBoolean("day", true),
             city = p.getString("city", "").orEmpty(),
             updatedAt = p.getLong("at", 0),
-            rainChance = p.getInt("rainDay", -1),
-            rainChanceNextHour = p.getInt("rainHour", -1),
+            text = p.getString("text", "").orEmpty(),
         )
     }
 
@@ -103,5 +101,20 @@ object Store {
         val legacy = listOf("ovEnabled", "ovY", "ovBump", "ovYCustom", "a11y", "rainHint", "notifCard")
         if (legacy.none { p.contains(it) }) return
         p.edit().apply { legacy.forEach { remove(it) } }.apply()
+    }
+
+    /**
+     * 清掉「假位置」时代的旧快照。
+     *
+     * 老版本在没有定位时会用写死的深圳坐标去抓天气，那份快照会一直留在缓存里。
+     * 升级后第一次启动必须把它丢掉，否则界面还挂着深圳的温度和「温州市」，
+     * 用户会以为没修好。判断依据：没有 text 字段（老版本不存这个）→ 是老数据。
+     */
+    fun purgeStaleWeather(ctx: Context) {
+        val p = sp(ctx)
+        if (!p.contains("at")) return
+        if (p.contains("text")) return
+        p.edit().remove("at").remove("tNow").remove("tMax").remove("tMin")
+            .remove("code").remove("day").remove("city").apply()
     }
 }

@@ -10,10 +10,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.jack.lockdeck.data.LocationHelper
 import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.data.WeatherRepo
 import com.jack.lockdeck.tile.WeatherTileInUse
-import com.jack.lockdeck.data.WeatherApi
 import java.util.concurrent.TimeUnit
 
 /**
@@ -32,21 +31,25 @@ class WeatherWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val tileUsed = WeatherTileInUse.marked(applicationContext)
         if (!Store.isEnabled(applicationContext) && !tileUsed) return Result.success()
 
-        val fix = LocationHelper.lastKnown(applicationContext) ?: LocationHelper.FALLBACK
-        val fetched = WeatherApi.fetch(fix.lat, fix.lon).getOrNull()
-            ?: return Result.retry()
-
-        // 城市名只在没缓存过时反查，省流量
-        val cachedCity = Store.loadWeather(applicationContext)?.city.orEmpty()
-        val city = cachedCity.ifBlank { WeatherApi.reverseCity(fix.lat, fix.lon) }
-
-        val w = fetched.copy(city = city)
-        Store.saveWeather(applicationContext, w)
-
-        // 重写常驻通知，保证下拉第一屏和锁屏上都是新数据
-        WeatherNotifier.show(applicationContext, w)
-
-        return Result.success()
+        // 刷新走统一入口，和前台「立即刷新」是同一条路——
+        // 以前这里单独写了一份，导致后台刷新会用写死的深圳坐标。
+        val r = WeatherRepo.refresh(applicationContext)
+        return when (r) {
+            is WeatherRepo.Result.Ok -> {
+                // 重写常驻通知，保证下拉第一屏上是新数据
+                WeatherNotifier.show(applicationContext, r.weather)
+                Result.success()
+            }
+            // 没有定位权限：重试也没用，要用户去给权限。别烧电量重试。
+            WeatherRepo.Result.NoPermission -> {
+                WeatherNotifier.show(applicationContext, Store.loadWeather(applicationContext))
+                Result.success()
+            }
+            // 暂时没位置（室内/刚开机）：过一阵再试
+            WeatherRepo.Result.NoLocation -> Result.retry()
+            // 接口挂了：重试
+            is WeatherRepo.Result.Failed -> Result.retry()
+        }
     }
 
     companion object {

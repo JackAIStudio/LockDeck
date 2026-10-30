@@ -62,6 +62,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // 旧版本的锁屏浮层设置在这里清掉（那套东西已经整个删了）
         Store.purgeLegacyOverlayPrefs(this)
+        // 老版本在没定位时用写死的深圳坐标抓天气，那份假快照必须丢掉，
+        // 否则升级后还挂着深圳的温度和地名，看起来像没修好。
+        Store.purgeStaleWeather(this)
         // App 一起来就把常驻通知挂上，不依赖用户去点刷新按钮。
         if (Store.isEnabled(this)) {
             WeatherForegroundService.refresh(this, Store.loadWeather(this))
@@ -344,12 +347,35 @@ class MainActivity : ComponentActivity() {
                                         "定位权限：${if (LocationHelper.hasPermission(ctx)) "已开启" else "未开启"}",
                                         fontSize = 11.sp,
                                     )
+                                    // 后台定位是独立的一档，必须单独看。没给的话后台刷新拿不到位置，
+                                    // 表现就是「前台是温州、过一会儿变别的地方」。
                                     Text(
-                                        "系统定位复用：" +
-                                            (if (LocationHelper.lastKnown(ctx) != null) "有缓存位置" else "无缓存，使用默认位置"),
+                                        "后台定位：${if (LocationHelper.hasBackgroundPermission(ctx)) "已允许（始终）" else "只允许在前台——后台刷新会用到上次的位置"}",
                                         fontSize = 11.sp,
                                     )
-                                    Text("天气数据：Open-Meteo（免费，无需 key）", fontSize = 11.sp)
+                                    Text(
+                                        "当前位置：" + (runCatching {
+                                            LocationHelper.get(ctx, allowActive = false)?.let {
+                                                "%.4f, %.4f".format(it.lat, it.lon)
+                                            }
+                                        }.getOrNull() ?: "还没拿到（下拉一次控制中心或点立即刷新）"),
+                                        fontSize = 11.sp,
+                                    )
+                                    // 上一次刷新用的是「刚定位的」还是「退到缓存的位置」。
+                                    // 后台刷新如果长期停在 CACHED/PERSISTED，说明后台定位没真正生效，
+                                    // 温度会跟着慢半拍——这是排查「过一会儿就变地方」的关键一行。
+                                    Text(
+                                        "上次定位来源：" + when (
+                                            Store.prefs(ctx).getString("lastFixSource", null)
+                                        ) {
+                                            "FRESH" -> "刚定位（最新）"
+                                            "CACHED" -> "系统缓存（可能已经移动过）"
+                                            "PERSISTED" -> "上次成功定位（当前没拿到新位置）"
+                                            else -> "还没刷新过"
+                                        },
+                                        fontSize = 11.sp,
+                                    )
+                                    Text("天气数据：中央气象台 weather.cma.cn（按区县匹配气象站）", fontSize = 11.sp)
                                     val err = Store.getError(ctx)
                                     if (!err.isNullOrBlank()) {
                                         Text("错误：$err", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)

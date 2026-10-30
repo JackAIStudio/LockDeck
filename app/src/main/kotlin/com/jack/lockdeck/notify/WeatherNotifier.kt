@@ -10,10 +10,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.jack.lockdeck.R
 import com.jack.lockdeck.action.QuickAction
-import com.jack.lockdeck.data.LocationHelper
 import com.jack.lockdeck.data.Store
 import com.jack.lockdeck.data.Weather
-import com.jack.lockdeck.data.WeatherApi
+import com.jack.lockdeck.data.WeatherRepo
 import com.jack.lockdeck.launch.LaunchTrampolineActivity
 
 /**
@@ -185,20 +184,12 @@ object WeatherNotifier {
 
     const val WEATHER = QuickAction.PKG_WEATHER
 
-    /** 供 UI 预览：拿到最新数据并返回（同步，仅用于 Activity 内部）。 */
+    /** 供 UI 预览：立刻刷一次并返回（同步，仅用于 Activity 内部）。 */
     fun refreshNow(ctx: Context): Weather? {
-        val fix = LocationHelper.lastKnown(ctx) ?: LocationHelper.FALLBACK
-        val res = WeatherApi.fetch(fix.lat, fix.lon)
-        val w = res.getOrElse { e ->
-            Store.setError(ctx, "天气请求失败: ${e.javaClass.simpleName}: ${e.message}")
-            return Store.loadWeather(ctx)
+        return when (val r = WeatherRepo.refresh(ctx)) {
+            is WeatherRepo.Result.Ok -> r.weather
+            // 拿不到就返回最后一份成功的快照（可能是 null），绝不补一个假位置
+            else -> Store.loadWeather(ctx)
         }
-        Store.setError(ctx, null)
-        val city = Store.loadWeather(ctx)?.city.orEmpty().ifBlank {
-            WeatherApi.reverseCity(fix.lat, fix.lon)
-        }
-        val merged = w.copy(city = city)
-        Store.saveWeather(ctx, merged)
-        return merged
     }
 }

@@ -2,6 +2,11 @@ package com.jack.lockdeck.tile
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -12,18 +17,27 @@ import com.jack.lockdeck.data.Store
 import com.jack.lockdeck.launch.LaunchTrampolineActivity
 
 /**
- * 天气磁贴：右侧下拉（控制中心）直接看天气。
+ * 天气磁贴：控制中心里直接看温度。
  *
- * 磁贴能显示的东西有限——只有 label + subtitle + 图标，
- * 但刚好够放"23°"和"晴 · 温州"。点一下打开小米天气看详情。
+ * ## 为什么温度要画成图标
  *
- * 扫一扫、收付款这些「点一下就发生」的动作只留在这里（控制中心），
- * 通知栏那条只负责信息展示——两处不重复，用户不用记两套入口。
+ * HyperOS 的控制中心磁贴格子**只渲染图标，不渲染 label / subtitle**
+ * （实测：label 设成 "32°" 什么都不显示，subtitle 也一样）。
+ * 所以想在那里看到温度，唯一的办法是把数字**画进图标位图**：
+ * `Icon.createWithBitmap()` + 自己 Canvas 画字。
+ *
+ * 这一点在 AOSP 原生控制中心上不一样（那边会显示 label），
+ * 所以这里两种都设：文字画进图标（HyperOS 看得到），
+ * label/subtitle 也照常填（原生 ROM 上看得到）。
+ *
+ * ## 颜色会被系统统一染色
+ *
+ * 实测 HyperOS 会把第三方磁贴图标整体染成纯白：画一个红绿蓝三色的图，
+ * 控制中心里显示出来是全白。所以这里不要指望颜色，靠**形状和字形**区分。
+ * 这也解释了为什么原来那几个扫一扫磁贴只能做成纯白剪影。
  *
  * 天气数据不在这里抓：onStartListening 会被系统高频调用，抓一次就是一次网络请求。
  * 数据由 [com.jack.lockdeck.notify.WeatherWorker] 定时写进缓存，这里只读取。
- * 只要磁贴被摆进控制中心过，就会打上 [WeatherTileInUse] 标记，
- * 通知栏关掉之后 Worker 仍会继续刷新它。
  */
 class WeatherTileService : TileService() {
 
@@ -55,22 +69,57 @@ class WeatherTileService : TileService() {
     private fun refreshTile() {
         val tile = qsTile ?: return
         val w = Store.loadWeather(this)
+
         if (w == null) {
             tile.label = "天气"
             tile.state = Tile.STATE_UNAVAILABLE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // 把真实原因说出来：没有定位权限 / 还没定位，别让用户猜
+                tile.subtitle = Store.getError(this) ?: "暂无数据"
+            }
+            tile.icon = Icon.createWithResource(this, R.drawable.ic_tile_weather)
         } else {
-            tile.label = "${w.tempNow}°"
+            tile.label = "${w.tempNow}° ${w.description}"
             tile.state = Tile.STATE_INACTIVE
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = w?.let {
-                buildString {
-                    append(it.description)
-                    if (it.city.isNotBlank()) append(" · ").append(it.city)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                tile.subtitle = buildString {
+                    append(w.tempMin).append("°~").append(w.tempMax).append("°")
+                    if (w.city.isNotBlank()) append(" · ").append(w.city)
                 }
-            } ?: "暂无数据"
+            }
+            // 关键：温度画进位图。HyperOS 只认图标这一层。
+            tile.icon = Icon.createWithBitmap(tempBitmap("${w.tempNow}°"))
         }
-        tile.icon = Icon.createWithResource(this, R.drawable.ic_tile_weather)
         tile.updateTile()
+    }
+
+    /**
+     * 把一段文字画成图标位图。
+     *
+     * 尺寸 192px：磁贴实际显示约 24~48dp，2x/3x 屏放上去还有余量，
+     * 再大只是浪费内存（Bitmap 走 Binder 传给 SystemUI）。
+     *
+     * 纯白字：反正会被系统染色，自己画白的最稳。
+     */
+    private fun tempBitmap(text: String): Bitmap {
+        val size = 192
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            // 「-12°」这种最长的情况要能塞下，所以按字数调字号
+            textSize = when {
+                text.length <= 2 -> size * 0.56f
+                text.length == 3 -> size * 0.50f
+                else -> size * 0.40f
+            }
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        // 垂直居中：用 fontMetrics 算基线，不然数字会偏下
+        val fm = paint.fontMetrics
+        val baseline = size / 2f - (fm.ascent + fm.descent) / 2f
+        canvas.drawText(text, size / 2f, baseline, paint)
+        return bmp
     }
 }
