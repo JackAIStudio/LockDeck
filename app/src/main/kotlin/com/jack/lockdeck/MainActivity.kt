@@ -102,7 +102,8 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text("锁屏快捷台", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                "锁屏卡片：天气 + 两个自定义按钮；控制中心：两个自定义磁贴。",
+                                "锁屏卡片：天气 + 两个自定义按钮；控制中心：天气和两个自定义磁贴；" +
+                                    "通知栏：解锁后可点的一行天气卡片。",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
