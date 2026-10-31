@@ -19,7 +19,9 @@ class RefreshReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             ACTION_REFRESH -> {
-                WeatherWorker.enqueueNow(ctx)
+                // 走前台服务那条循环刷新：实测 WorkManager 在这台机器上
+                // 不会真正执行（run_attempt_count 一直是 0），靠它刷新等于没刷新。
+                WeatherForegroundService.refreshNow(ctx)
                 // 先重写一次通知，避免用户以为没反应
                 WeatherNotifier.show(ctx, Store.loadWeather(ctx))
             }
