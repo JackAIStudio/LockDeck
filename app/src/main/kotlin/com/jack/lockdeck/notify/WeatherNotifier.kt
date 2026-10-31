@@ -42,9 +42,21 @@ import com.jack.lockdeck.launch.LaunchTrampolineActivity
  *
  * ## 一条实测结论：这条通知**上不了锁屏**
  *
- * HyperOS 3 的锁屏通知区默认只放系统级通知（实测：USB 那条 pkg=android 的
- * 能上，第三方的上不去）。IMPORTANCE_LOW / DEFAULT / HIGH 三档都试过，
- * JackVoice 那条同样进不了锁屏——不是我们参数没调对，是系统行为。
+ * HyperOS 3（Redmi Turbo 5 / OS3.0 / Android 16）的锁屏通知由 SystemUI 的
+ * `KeyguardCoordinator` + `MiuiNotifCoordinator` 两个过滤器决定，
+ * 第三方应用默认被判成 `keyguard=false`，只进下拉栏、不进锁屏。
+ *
+ * **下列变量已逐一排除，全都不是原因**（2026-11 真机复测）：
+ * - 勿扰模式：关掉勿扰后普通第三方通知照样上不去
+ * - importance：LOW / DEFAULT / HIGH 三档结果一致
+ * - 静音：`setSilent(true)` / `false` 结果一致
+ * - 系统「锁屏通知」档位：改成「显示无声通知」后仍然上不去
+ * - 焦点通知 / 超级岛：带 `miui.focus.param` 能拿到 `focusType=PARAMS`，
+ *   但锁屏依旧被 `KeyguardCoordinator` 过滤；本机真实样本「九号出行」
+ *   的电池岛同样上不了锁屏
+ *
+ * 唯一决定因素是 MIUI 按应用下发的锁屏权限，App 侧无法用参数绕过。
+ * 详见 [LockScreenCheck]（那里有可复现的自检入口）。
  *
  * 早期版本为了在锁屏上显示天气，用无障碍服务画了一层 TYPE_ACCESSIBILITY_OVERLAY
  * 浮层。那玩意儿会盖在别人通知上、还要每 1.5 秒轮询一次无障碍节点树，

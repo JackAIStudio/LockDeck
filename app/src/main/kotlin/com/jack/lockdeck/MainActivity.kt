@@ -43,6 +43,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.jack.lockdeck.action.QuickAction
 import com.jack.lockdeck.data.LocationHelper
 import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.notify.LockScreenCheck
 import com.jack.lockdeck.notify.WeatherForegroundService
 import com.jack.lockdeck.notify.WeatherNotifier
 import com.jack.lockdeck.notify.WeatherWorker
@@ -192,6 +193,35 @@ class MainActivity : ComponentActivity() {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
                                 )
+                            }
+
+                            // ---------- 锁屏可见性自检 ----------
+                            // 这不是「设置项」，是现场验证：HyperOS 按应用决定能不能上锁屏，
+                            // 只有真机点亮一次才知道答案，任何参数说明都不如它直接。
+                            var checkText by remember { mutableStateOf(LockScreenCheck.summary(ctx)) }
+                            Card {
+                                Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                    Text("锁屏可见性自检", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                    Text(
+                                        checkText,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.padding(top = 10.dp),
+                                    ) {
+                                        OutlinedButton(onClick = {
+                                            LockScreenCheck.postProbe(ctx)
+                                            checkText = LockScreenCheck.summary(ctx)
+                                            log = "已发一条自检通知：锁屏点亮看一眼，有就是放行"
+                                        }) { Text("发一条自检通知") }
+                                        TextButton(onClick = {
+                                            checkText = LockScreenCheck.summary(ctx)
+                                        }) { Text("重新读取") }
+                                    }
+                                }
                             }
 
                             // ---------- 刷新间隔 ----------
