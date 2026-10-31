@@ -16,12 +16,21 @@ import com.jack.lockdeck.tile.WeatherTileInUse
 import java.util.concurrent.TimeUnit
 
 /**
- * 定时刷新天气。
+ * WorkManager 兜底刷新。
  *
- * 小米会杀后台，所以：
- * - 用 WorkManager（系统级调度，比自建 Service 抗杀）
- * - 有网络约束
- * - 刷新完立刻重写通知，保证锁屏上是最新的
+ * ## 它现在只是备胎
+ *
+ * 真正干活的是 [WeatherForegroundService] 里那条定时循环。原因见那个类的注释：
+ * HyperOS 3 上实测这个 Worker **从来不会被执行**——任务在队列里躺着
+ * （`state=0`），`run_attempt_count` 永远是 0，用 `jobscheduler run -f`
+ * 强制触发也照样不跑。
+ *
+ * 留着它是因为：
+ *  - 万一服务被杀、系统又没自愈，这里至少还有一次补救机会
+ *  - 原生 Android（没有 HyperOS 那套限制）上它是正常工作的，
+ *    那种情况下前台服务反而可能因为省电策略被停掉
+ *
+ * 所以它不做任何「主逻辑」，只是把同样的刷新再调一遍。
  */
 class WeatherWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
 

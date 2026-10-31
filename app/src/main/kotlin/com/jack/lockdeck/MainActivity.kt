@@ -216,6 +216,9 @@ class MainActivity : ComponentActivity() {
                                                         interval = m
                                                         Store.setRefreshMinutes(ctx, m)
                                                         WeatherWorker.schedule(ctx)
+                                                        // 真正干活的是前台服务里那条循环，
+                                                        // 让它按新间隔重排一次，否则改了要等这一轮走完才生效
+                                                        WeatherForegroundService.reschedule(ctx)
                                                         log = "刷新间隔已设为 $m 分钟"
                                                     },
                                                 ) { Text("${m}分") }

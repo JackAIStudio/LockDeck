@@ -1,6 +1,8 @@
 package com.jack.lockdeck.tile
 
+import android.content.ComponentName
 import android.content.Context
+import android.service.quicksettings.TileService
 import com.jack.lockdeck.data.Store
 
 /**
@@ -26,4 +28,22 @@ object WeatherTileInUse {
     }
 
     fun marked(ctx: Context): Boolean = Store.prefs(ctx).getBoolean(KEY, false)
+
+    /**
+     * 请系统让磁贴重新走一遍 [TileService.onStartListening]。
+     *
+     * 后台刷新完温度变了，但磁贴上还是旧的——因为 TileService 平时根本不会被调用，
+     * 只有系统要显示控制中心时才会拉它起来。这个 API 就是「提前通知它一下」，
+     * 让下次下拉时拿到的是最新值。
+     *
+     * 失败无所谓（比如磁贴根本没加进控制中心），吞掉即可。
+     */
+    fun requestUpdate(ctx: Context) {
+        runCatching {
+            TileService.requestListeningState(
+                ctx,
+                ComponentName(ctx, WeatherTileService::class.java),
+            )
+        }
+    }
 }
