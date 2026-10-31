@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 临时备份（APK 等大文件不入库）
+.backup/
+*.apk
