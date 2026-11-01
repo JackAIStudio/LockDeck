@@ -5,37 +5,34 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 天气数据源。
+ * 中央气象台 weather.cma.cn —— 观测站数据。
  *
- * ## 为什么从 Open-Meteo 换成中央气象台
+ * ## 定位：现在它是**备胎**，默认源是小米（见 [WeatherSource]）
  *
- * 老版本用 Open-Meteo，它是 ECMWF/ICON 全球模式在某个格点上的**插值**，
- * 不是当地观测站。实测同一时刻温州：
+ * 这里保留它，是因为它是三者里最稳的一个：免费、无需 key、
+ * 不依赖任何私有接口，跑了很久没出过问题。
  *
- *  - 中央气象台温州站 58659：20.9°C
- *  - Open-Meteo（同一坐标）：25.5°C
+ * ## 为什么它给不出「和手机一样」的数
  *
- * 差 4.6 度。用户看到的就是「和小米官方差了 5 度」。
- * 小米天气、中国天气网、中央气象台用的是同一套地面观测站数据，
- * 换成中央气象台之后差距能压到 1 度内。
+ * 中央气象台按**气象站**给数据，而市区三个区（鹿城/龙湾/瓯海）
+ * **只有鹿城有站（58659，在五马街道海坦山路）**，瓯海、龙湾都共用它。
+ * 实测 2026-11-01 09:00 同一时刻：
+ *
+ *  - 小米（鹿城）：18°C     ← 用户手机上就是这个
+ *  - 中国天气网鹿城：18.2°C
+ *  - 中央气象台 58659：20.6°C
+ *
+ * 差 2.6 度。不是接口不准，是**站离你远**——58659 那份是国家站口径，
+ * 而且这个站在山坡上（站表标注「山顶、市区」），比城区低一点是常态。
+ *
+ * 所以别指望换回来还能和手机对得上，鱼和熊掌。
  *
  * ## 为什么不用中国天气网
  *
- * d1.weather.com.cn 更接近小米那份（区县级、连「多云转晴」这种描述都一样），
- * 但它有两个硬伤：
- *  - 必须带 Referer 头，且只支持 http（App 里要开 cleartextTraffic）
- *  - **限流很凶**：短时间内连测几次就整片 403 返回 Forbid_code
- *  - 预报字段不稳定：实测出现过 fc 数组缺失、最高温给 "999" 占位
- * 天气是每 5~10 分钟自动刷的东西，放到这种接口上迟早挂。
- *
- * 中央气象台（weather.cma.cn）连续 6 次请求 0 失败，且同时给实况 + 7 天预报。
- *
- * ## 区县精度
- *
- * 中央气象台按**气象站**给数据，同一个市下面各区县可能是不同的站
- * （温州 58659、乐清 58656、瑞安 58752、永嘉 58658…）。
- * 所以先用反查拿到的区县名（鹿城区）去省站表里匹配同名站，
- * 匹配不到再退回市名（温州 → 58659）。这样精度能贴到用户所在区县。
+ * 它反而有区县码（鹿城 101210710），比 CMA 更贴手机。
+ * 但它必须带 Referer、只支持 http（App 里要开 cleartextTraffic），
+ * 而且不是公开 API——本质和小米那条路一样是逆工程，却不如小米准。
+ * 所以选小米，不选它。
  */
 object WeatherApi {
 
@@ -69,6 +66,7 @@ object WeatherApi {
         var tempMin = tempNow
         var code = 0
         var text = ""
+        val dayPoints = mutableListOf<DayPoint>()
         if (daily != null) {
             runCatching {
                 val days = daily.getJSONObject("data").getJSONArray("daily")
@@ -77,6 +75,22 @@ object WeatherApi {
                 tempMin = Math.round(today.getDouble("low")).toInt()
                 code = today.optInt("dayCode", 0)
                 text = today.optString("dayText").trim()
+
+                val fmtDate = java.text.SimpleDateFormat("M月d日", java.util.Locale.CHINA)
+                val fmtWeek = java.text.SimpleDateFormat("EEE", java.util.Locale.CHINA)
+                val parse = java.text.SimpleDateFormat("yyyy/MM/dd", java.util.Locale.CHINA)
+                for (i in 0 until minOf(days.length(), 7)) {
+                    val d = days.getJSONObject(i)
+                    val dt = runCatching { parse.parse(d.optString("date")) }.getOrNull()
+                    dayPoints += DayPoint(
+                        date = dt?.let { fmtDate.format(it) } ?: d.optString("date"),
+                        weekday = if (i == 0) "今天" else dt?.let { fmtWeek.format(it) }.orEmpty(),
+                        weatherCode = d.optInt("dayCode", 0),
+                        text = d.optString("dayText").trim(),
+                        tempMax = Math.round(d.getDouble("high")).toInt(),
+                        tempMin = Math.round(d.getDouble("low")).toInt(),
+                    )
+                }
             }
         }
 
@@ -95,6 +109,18 @@ object WeatherApi {
             district = place.district,
             updatedAt = System.currentTimeMillis(),
             text = text,
+            feelsLike = Math.round(nowObj.optDouble("feelst", Double.NaN)).toInt()
+                .let { if (it >= 0) it else null },
+            humidity = Math.round(nowObj.optDouble("humidity", Double.NaN)).toInt()
+                .let { if (it >= 0) it else null },
+            pressure = Math.round(nowObj.optDouble("pressure", Double.NaN)).toInt()
+                .let { if (it >= 0) it else null },
+            windDirection = Math.round(nowObj.optDouble("windDirectionDegree", Double.NaN)).toInt()
+                .let { if (it >= 0) it else null },
+            windSpeed = Math.round(nowObj.optDouble("windSpeed", Double.NaN)).toInt()
+                .let { if (it >= 0) it else null },
+            daily = dayPoints,
+            source = WeatherSource.CMA,
         )
     }
 

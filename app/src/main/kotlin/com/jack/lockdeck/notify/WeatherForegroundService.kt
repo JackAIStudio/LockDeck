@@ -234,7 +234,7 @@ class WeatherForegroundService : Service() {
 
         const val ACTION_REFRESH_NOW = "com.jack.lockdeck.REFRESH_NOW"
 
-        /** 刷新间隔改了，重排下一轮 */
+        /** 刷新间隔改了（或换了数据源，其默认间隔不同），重排下一轮 */
         const val ACTION_RESCHEDULE = "com.jack.lockdeck.RESCHEDULE"
 
         /** 让服务按当前设置重排定时（改完刷新间隔后调用）。 */

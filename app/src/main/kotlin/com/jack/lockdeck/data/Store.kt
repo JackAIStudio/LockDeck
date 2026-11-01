@@ -15,6 +15,20 @@ object Store {
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences(P, Context.MODE_PRIVATE)
 
+    // ---- 数据源 ----
+
+    /**
+     * 用户选的天气数据源，默认小米。
+     *
+     * 为什么不自动降级：静默换源会让用户看到「温度忽然变了 2 度」
+     * 却不知道该怀疑什么。宁可失败时报错、让用户自己切，也不要偷换。
+     */
+    fun getSource(ctx: Context): WeatherSource =
+        WeatherSource.fromName(sp(ctx).getString("source", null))
+
+    fun setSource(ctx: Context, s: WeatherSource) =
+        sp(ctx).edit().putString("source", s.name).apply()
+
     // ---- 天气快照 ----
     fun saveWeather(ctx: Context, w: Weather) {
         sp(ctx).edit()
@@ -26,7 +40,21 @@ object Store {
             .putString("city", w.city)
             .putString("district", w.district)
             .putString("text", w.text)
+            .putString("src", w.source.name)
             .putLong("at", w.updatedAt)
+            // 以下是小米源才有的东西，没有就不写（留着旧值比写 null 好读）
+            .apply {
+                w.feelsLike?.let { putInt("feels", it) } ?: remove("feels")
+                w.humidity?.let { putInt("hum", it) } ?: remove("hum")
+                w.pressure?.let { putInt("pres", it) } ?: remove("pres")
+                w.uvIndex?.let { putInt("uv", it) } ?: remove("uv")
+                w.windDirection?.let { putInt("wdir", it) } ?: remove("wdir")
+                w.windSpeed?.let { putInt("wspd", it) } ?: remove("wspd")
+                w.aqi?.let { putString("aqiJson", AqiCodec.encode(it)) } ?: remove("aqiJson")
+                w.minutely?.let { putString("rainJson", MinutelyCodec.encode(it)) } ?: remove("rainJson")
+                putString("hoursJson", HourCodec.encode(w.hourly))
+                putString("daysJson", DayCodec.encode(w.daily))
+            }
             .apply()
     }
 
@@ -43,8 +71,22 @@ object Store {
             district = p.getString("district", "").orEmpty(),
             updatedAt = p.getLong("at", 0),
             text = p.getString("text", "").orEmpty(),
+            feelsLike = p.getIntOrNull("feels"),
+            humidity = p.getIntOrNull("hum"),
+            pressure = p.getIntOrNull("pres"),
+            uvIndex = p.getIntOrNull("uv"),
+            windDirection = p.getIntOrNull("wdir"),
+            windSpeed = p.getIntOrNull("wspd"),
+            aqi = AqiCodec.decode(p.getString("aqiJson", null)),
+            minutely = MinutelyCodec.decode(p.getString("rainJson", null)),
+            hourly = HourCodec.decode(p.getString("hoursJson", null)),
+            daily = DayCodec.decode(p.getString("daysJson", null)),
+            source = WeatherSource.fromName(p.getString("src", null)),
         )
     }
+
+    private fun android.content.SharedPreferences.getIntOrNull(key: String): Int? =
+        if (contains(key)) getInt(key, 0) else null
 
     // ---- 点击区绑定 ----
     // zone: main / app1 / app2  →  action id（见 QuickAction）
@@ -83,10 +125,67 @@ object Store {
 
     fun getError(ctx: Context): String? = sp(ctx).getString("lastError", null)
 
-    // ---- 刷新间隔（分钟），默认 10 ----
-    fun getRefreshMinutes(ctx: Context): Int = sp(ctx).getInt("refreshMin", 10)
+    // ---- 刷新间隔（分钟）----
+
+    /**
+     * 默认刷新间隔，按数据源给不同的值。
+     *
+     * 实测两个源的更新节奏差很多（2026-11-01 采样）：
+     *  - 小米 `updateTime` 每 5 分钟推进一次，`current.pubTime` 跟着走
+     *  - 中央气象台观测站约 10 分钟一批（08:20 → 08:35 → 08:50）
+     *
+     * 所以小米默认 5 分钟、其它默认 10 分钟。用户手动改过之后以用户为准。
+     *
+     * 按 5 分钟算我们的请求量：一天 288 次、一个月约 8600 次。
+     * 小米那个接口实测 120 次连打（8 并发）全部 200，这个量级不是问题。
+     */
+    fun defaultRefreshMinutes(source: WeatherSource): Int = when (source) {
+        WeatherSource.XIAOMI -> 5
+        WeatherSource.CMA, WeatherSource.OPEN_METEO -> 10
+    }
+
+    fun getRefreshMinutes(ctx: Context): Int =
+        sp(ctx).getInt("refreshMin", defaultRefreshMinutes(getSource(ctx)))
+
     fun setRefreshMinutes(ctx: Context, m: Int) =
         sp(ctx).edit().putInt("refreshMin", m.coerceIn(5, 120)).apply()
+
+    /** 丢掉用户设过的间隔，回到当前数据源的默认值（换源时用）。 */
+    fun clearRefreshMinutes(ctx: Context) =
+        sp(ctx).edit().remove("refreshMin").apply()
+
+    /**
+     * 清掉「不是当前数据源抓的」旧快照。
+     *
+     * ## 为什么需要
+     *
+     * 缓存的温度和「高低温、体感、AQI」是同一个源在同一次请求里一起给的。
+     * 升级版本、或者用户切了数据源之后，如果还挂着上一份快照，界面会把
+     * **两个源的口径混在一起**：比如温州真实 18°，界面上却写着「21°，今日 20°~29°」，
+     * 而那组高低温是中央气象台温州站（在山上）的。
+     *
+     * 实测代价很具体：小米 18° / CMA 58659 20.6°，差 2.6 度。
+     * 混着的界面比干脆显示「正在获取」更难解释，所以宁可丢掉。
+     *
+     * @return true 表示丢掉了一份旧快照（调用方应该立刻重抓）
+     */
+    fun purgeForeignWeather(ctx: Context): Boolean {
+        val p = sp(ctx)
+        if (!p.contains("at")) return false
+        val cached = WeatherSource.fromName(p.getString("src", null))
+        // 老版本没有 src 键，那时用的就是中央气象台
+        val cachedSource = if (p.contains("src")) cached else WeatherSource.CMA
+        if (cachedSource == getSource(ctx)) return false
+
+        p.edit()
+            .remove("at").remove("tNow").remove("tMax").remove("tMin")
+            .remove("code").remove("day").remove("city").remove("district").remove("text")
+            .remove("src").remove("feels").remove("hum").remove("pres").remove("uv")
+            .remove("wdir").remove("wspd").remove("aqiJson").remove("rainJson")
+            .remove("hoursJson").remove("daysJson")
+            .apply()
+        return true
+    }
 
     /**
      * 清掉旧版本锁屏浮层留下的死键。

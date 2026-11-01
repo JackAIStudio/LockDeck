@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +38,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,6 +50,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.jack.lockdeck.action.QuickAction
 import com.jack.lockdeck.data.LocationHelper
 import com.jack.lockdeck.data.Store
+import com.jack.lockdeck.data.WeatherSource
 import com.jack.lockdeck.notify.LockScreenCheck
 import com.jack.lockdeck.notify.WeatherForegroundService
 import com.jack.lockdeck.notify.WeatherNotifier
@@ -66,9 +74,16 @@ class MainActivity : ComponentActivity() {
         // 老版本在没定位时用写死的深圳坐标抓天气，那份假快照必须丢掉，
         // 否则升级后还挂着深圳的温度和地名，看起来像没修好。
         Store.purgeStaleWeather(this)
+        // 缓存里的快照如果不是当前数据源抓的，必须丢掉重抓，
+        // 否则界面会拿小米的实况配中央气象台的高低温（差 2.6 度）。
+        val foreignPurged = Store.purgeForeignWeather(this)
         // App 一起来就把常驻通知挂上，不依赖用户去点刷新按钮。
         if (Store.isEnabled(this)) {
             WeatherForegroundService.refresh(this, Store.loadWeather(this))
+        }
+        // 丢过旧快照就顺手补一次，不然用户会看到「正在获取天气」一直到下一轮定时
+        if (foreignPurged) {
+            runCatching { WeatherForegroundService.refreshNow(this) }
         }
         setContent {
             LockDeckTheme {
@@ -143,6 +158,120 @@ class MainActivity : ComponentActivity() {
                                                 fontSize = 12.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
+                                        }
+                                    }
+                                    weather?.let { w ->
+                                        // 体感、湿度这些只有小米源给；没有就整行不显示，
+                                        // 不拿 0 或 "--" 占位（那比不显示更让人困惑）
+                                        val bits = buildList {
+                                            w.feelsLike?.let { add("体感 $it°") }
+                                            w.humidity?.let { add("湿度 $it%") }
+                                            w.uvIndex?.let { add("紫外线 $it") }
+                                            w.windDirection?.let { d ->
+                                                val dir = com.jack.lockdeck.data.WeatherCodes.windDirection(d)
+                                                w.windSpeed?.let { add("$dir $it km/h") } ?: add(dir)
+                                            }
+                                        }
+                                        if (bits.isNotEmpty()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                bits.joinToString(" · "),
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        w.aqi?.let { a ->
+                                            Spacer(Modifier.height(6.dp))
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("🍃 空气${a.level}", fontSize = 11.sp)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    "AQI ${a.value}", fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                a.pm25?.let {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(
+                                                        "PM2.5 $it", fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        w.minutely?.let { m ->
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(
+                                                "☔ " + m.summary,
+                                                fontSize = 11.sp,
+                                                color = if (m.hasRain) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ---------- 未来 24 小时曲线 ----------
+                            val hours = weather?.hourly.orEmpty()
+                            if (hours.isNotEmpty()) {
+                                Card {
+                                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                        Text("未来 24 小时", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        Text(
+                                            "${hours.first().hour}:00 → ${hours.last().hour}:00" +
+                                                "（${weather?.source?.label}）",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Spacer(Modifier.height(10.dp))
+                                        TempCurve(
+                                            hours = hours,
+                                            modifier = Modifier.fillMaxWidth().height(72.dp),
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            hours.filterIndexed { i, _ -> i % 4 == 0 }.forEach {
+                                                Text(
+                                                    "${it.hour}时 ${it.temp}°",
+                                                    fontSize = 9.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ---------- 未来几天 ----------
+                            val days = weather?.daily.orEmpty()
+                            if (days.isNotEmpty()) {
+                                Card {
+                                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                        Text(
+                                            "未来 ${minOf(days.size, 7)} 天", fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        days.take(7).forEach { d ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    d.date, fontSize = 11.sp,
+                                                    modifier = Modifier.width(64.dp),
+                                                )
+                                                Text(
+                                                    d.weekday, fontSize = 11.sp,
+                                                    modifier = Modifier.width(44.dp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                Text(d.text, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                                Text("${d.tempMin}° ~ ${d.tempMax}°", fontSize = 11.sp)
+                                            }
                                         }
                                     }
                                 }
@@ -224,14 +353,83 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
+                            // ---------- 数据源 ----------
+                            Text("天气数据源", fontWeight = FontWeight.Medium)
+                            var source by remember { mutableStateOf(Store.getSource(ctx)) }
+                            // 刷新间隔放在这里而不是下面：换数据源时它的默认值会变，
+                            // 两个区块要读写同一份 state，声明得在共同祖先上
+                            var interval by remember { mutableStateOf(Store.getRefreshMinutes(ctx)) }
+                            Card {
+                                Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                    Text(
+                                        "当前用「${source.label}」。小米是默认源，数值和手机自带天气" +
+                                            "完全一致（本来就是同一个后端），一次请求就能拿到分钟级降水和空气质量。",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    WeatherSource.entries.forEach { s ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(
+                                                    s.label + if (s == source) "  ✓" else "",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = if (s == source) FontWeight.Medium else FontWeight.Normal,
+                                                    color = if (s == source) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.onSurface,
+                                                )
+                                                Text(
+                                                    s.detail,
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            if (s != source) {
+                                                TextButton(onClick = {
+                                                    source = s
+                                                    Store.setSource(ctx, s)
+                                                    // 两个源更新节奏不同（小米 5 分钟 / CMA 10 分钟）。
+                                                    // 之前手动设过间隔的，换源时清掉，回到新源的默认值；
+                                                    // 否则会出现「切到 CMA 了还按 5 分钟刷」这种没意义的请求。
+                                                    Store.clearRefreshMinutes(ctx)
+                                                    interval = Store.getRefreshMinutes(ctx)
+                                                    WeatherWorker.schedule(ctx)
+                                                    WeatherForegroundService.reschedule(ctx)
+                                                    // 换源之后旧快照是另一个口径的数，必须重抓，
+                                                    // 否则界面上会同时挂着「小米的18°」和「CMA的温州站」
+                                                    log = "已切换到 ${s.label}，正在重新抓取…"
+                                                    refresh()
+                                                }) { Text("用这个") }
+                                            }
+                                        }
+                                    }
+                                    if (source == WeatherSource.XIAOMI) {
+                                        Text(
+                                            "小米这条是私有接口：没有文档、没有 SLA，哪天它改了校验就失效。" +
+                                                "失效时这里会显示错误，点上面「用这个」切到中央气象台即可。",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 8.dp),
+                                        )
+                                    }
+                                }
+                            }
+
                             // ---------- 刷新间隔 ----------
                             Text("刷新设置", fontWeight = FontWeight.Medium)
-                            var interval by remember { mutableStateOf(Store.getRefreshMinutes(ctx)) }
                             Card {
                                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                     Text("刷新间隔：$interval 分钟", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     Text(
-                                        "中央气象台观测站数据，免费无需 key；观测站约每 10 分钟更新一次",
+                                        if (source == WeatherSource.XIAOMI) {
+                                            "小米实况约 5 分钟更新一次，分钟级降水约 1 分钟一次；" +
+                                                "5 分钟够跟上，再快也没新数据"
+                                        } else {
+                                            "中央气象台观测站约每 10 分钟更新一次，免费无需 key"
+                                        },
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -408,7 +606,12 @@ class MainActivity : ComponentActivity() {
                                         },
                                         fontSize = 11.sp,
                                     )
-                                    Text("天气数据：中央气象台 weather.cma.cn（按区县匹配气象站）", fontSize = 11.sp)
+                                    val curW = Store.loadWeather(ctx)
+                                    Text(
+                                        "天气数据：${Store.getSource(ctx).label}" +
+                                            (curW?.let { "（这份快照来自 ${it.source.label}）" } ?: ""),
+                                        fontSize = 11.sp,
+                                    )
                                     val err = Store.getError(ctx)
                                     if (!err.isNullOrBlank()) {
                                         Text("错误：$err", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
@@ -448,5 +651,58 @@ private fun TargetRow(
                 TextButton(onClick = onPick) { Text("选择") }
             }
         }
+    }
+}
+
+/**
+ * 温度曲线。
+ *
+ * 用 Canvas 手画而不是拖一个图表库：这里只需要一条折线 + 一条填充，
+ * 引一个 200KB 的图表库来画 24 个点不值当。
+ *
+ * 纵轴按这批数据的实际高低自适应（不写死 0~40），因为**看曲线的人关心的是
+ * "接下来怎么变"**，不是绝对刻度——温州 11 月的数据全挤在 18~29 之间，
+ * 固定 0~40 的轴会把曲线压成一条平线。
+ */
+@Composable
+private fun TempCurve(hours: List<com.jack.lockdeck.data.HourPoint>, modifier: Modifier = Modifier) {
+    if (hours.size < 2) return
+    val lineColor = MaterialTheme.colorScheme.primary
+    val fillColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        val temps = hours.map { it.temp.toFloat() }
+        val lo = temps.min()
+        val hi = temps.max()
+        // 上下各留 15% 余量，免得最高点/最低点贴着边框
+        val span = (hi - lo).takeIf { it > 0.5f } ?: 1f
+        val pad = span * 0.15f
+        val minT = lo - pad
+        val maxT = hi + pad
+        val range = (maxT - minT).takeIf { it > 0f } ?: 1f
+
+        val w = size.width
+        val h = size.height
+        val stepX = w / (temps.size - 1)
+
+        fun yFor(t: Float): Float = h - ((t - minT) / range) * h
+
+        val path = Path().apply {
+            moveTo(0f, yFor(temps[0]))
+            for (i in 1 until temps.size) lineTo(i * stepX, yFor(temps[i]))
+        }
+        // 填充：把折线首尾连到画布底部
+        val fill = Path().apply {
+            addPath(path)
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(
+            fill,
+            brush = Brush.verticalGradient(
+                listOf(fillColor.copy(alpha = 0.25f), fillColor.copy(alpha = 0.02f)),
+            ),
+        )
+        drawPath(path, color = lineColor, style = Stroke(width = 2.5f, cap = StrokeCap.Round))
     }
 }

@@ -117,12 +117,25 @@ object WeatherNotifier {
         // 不塞降雨概率：带上它就折成两行，跟 JackVoice 那种
         // 「标题一行 + 正文一行」的干净样式就不一样了。
         // 想看降雨就点开通知进天气 App。
-        val title = w?.let { "${it.tempNow}° ${it.description}" } ?: "正在获取天气"
+        //
+        // 唯一的例外是**马上要下雨**：那是「现在得决定带不带伞」的信息，
+        // 比温度区间重要，所以压过温度区间顶到正文第一行，标题也换成它。
+        // 不下雨的时候（99% 的时间）还是原来那两行，不占地方。
+        val rainSoon = w?.minutely?.takeIf { it.hasRain }
+        val title = when {
+            rainSoon != null -> rainSoon.summary
+            w != null -> "${w.tempNow}° ${w.description}"
+            else -> "正在获取天气"
+        }
         val detail = if (w == null) {
             "点开可手动刷新"
         } else {
             buildString {
-                append("今日 ${w.tempMin}°~${w.tempMax}°")
+                if (rainSoon == null) {
+                    append("今日 ${w.tempMin}°~${w.tempMax}°")
+                } else {
+                    append("${w.tempNow}° ${w.description} · 今日 ${w.tempMin}°~${w.tempMax}°")
+                }
                 if (w.place.isNotBlank()) append(" · ").append(w.place)
             }
         }

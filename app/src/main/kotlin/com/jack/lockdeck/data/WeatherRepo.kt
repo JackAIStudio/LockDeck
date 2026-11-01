@@ -15,11 +15,22 @@ import android.content.Context
  *
  * 现在只有这一条路，两边都调它。
  *
+ * ## 三个数据源，一个出口
+ *
+ * 用户可在设置页选 [WeatherSource]：
+ *  - **小米**（默认）：和手机自带天气同一后端，数值一致，还带分钟级降水
+ *  - **中央气象台**：免费无需 key 的老方案，最稳，但实况差 2 度上下
+ *  - **Open-Meteo**：最后一道防线，免费有 SLA
+ *
+ * 选哪个就只用哪个，**不做自动降级**。理由：静默降级会让用户看到
+ * 「温度忽然变了 2 度却不知道为什么」，比直接报错更难查。
+ * 小米失效时设置页会把错误原样显示出来，用户自己动手切。
+ *
  * ## 流程
  *
  *   定位 → 拿不到就报「等定位」，绝不编坐标
  *        → 反查市/区县/省
- *        → 用区县名去中央气象台省站表里挑最近的气象站
+ *        → 按用户选的数据源抓
  *        → 抓到数据写缓存
  */
 object WeatherRepo {
@@ -61,7 +72,7 @@ object WeatherRepo {
         // 2. 反查地名。
         //
         //    这里以前是「反查失败就整个放弃」。但反查是一次额外的网络请求，
-        //    失败率比气象台高得多（实测偶尔超时）。而坐标本身已经拿到了——
+        //    失败率比天气源高得多（实测偶尔超时）。而坐标本身已经拿到了——
         //    为了省一次请求把整次刷新作废，用户看到的就是「明明有网还是没数据」。
         //
         //    改成：反查失败就退到区域中心点继续抓天气。宁可气象站选得远一点，
@@ -74,9 +85,19 @@ object WeatherRepo {
             }
         }
 
-        // 3. 抓天气。站点按区县挑，挑不到退到市。
-        val w = WeatherApi.fetch(place).getOrElse { e ->
-            val msg = "天气请求失败: ${e.javaClass.simpleName}: ${e.message}"
+        // 3. 按用户选的数据源抓天气。
+        val source = Store.getSource(ctx)
+        val w: Weather = try {
+            when (source) {
+                WeatherSource.XIAOMI -> XiaomiWeatherApi.fetch(fix.lat, fix.lon, place)
+                WeatherSource.CMA -> WeatherApi.fetch(place).getOrThrow()
+                WeatherSource.OPEN_METEO -> OpenMeteoApi.fetch(fix.lat, fix.lon, place)
+            }
+        } catch (e: Throwable) {
+            val hint = if (source == WeatherSource.XIAOMI) {
+                "（小米是私有接口，可能已经失效，可在设置里改用中央气象台）"
+            } else ""
+            val msg = "${source.label}请求失败: ${e.javaClass.simpleName}: ${e.message}$hint"
             Store.setError(ctx, msg)
             return Result.Failed(msg)
         }
