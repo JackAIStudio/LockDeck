@@ -5,6 +5,24 @@ import android.content.Context
 /** 极简本地存储：天气快照 + 每个点击区绑定的包名。 */
 object Store {
     private const val P = "lsw"
+
+    /**
+     * 天气快照变更的广播 action。
+     *
+     * ## 为什么需要它
+     *
+     * 天气有三条刷新路径：设置页点「立即刷新」、前台服务的定时循环、
+     * 以及「打开 App 时补刷」。后两条都在**别处**更新缓存，
+     * 界面只是在打开那一刻读了一次 [loadWeather]，根本不知道数据变了。
+     *
+     * 结果是一种很别扭的状态：通知栏已经显示 27°，设置页上还挂着 28°，
+     * 退出再进来才对得上。用户看到的就是「刷新没生效」。
+     *
+     * 用本地广播而不是硬塞回调：刷新发生在后台线程、甚至另一个进程状态的
+     * Service 里，广播是唯一不需要把 UI 引用传来传去的做法。
+     * Context 已注册接收器不受广播导出限制影响，所以这里能用隐式广播。
+     */
+    const val ACTION_WEATHER_CHANGED = "com.jack.lockdeck.WEATHER_CHANGED"
     /**
      * 原始 SharedPreferences。
      *
@@ -62,6 +80,24 @@ object Store {
                 putString("daysJson", DayCodec.encode(w.daily))
             }
             .apply()
+
+        // 写完再喊一声，让界面重新读。放在 apply() 之后：订阅者收到广播时
+        // 立刻 loadWeather 必须读到新值，顺序反了就会拿到旧快照。
+        notifyWeatherChanged(ctx)
+    }
+
+    /**
+     * 通知界面天气变了。
+     *
+     * 用 sendBroadcast + 包名限定：只发给本应用，不会漏到外面去。
+     * 失败无所谓（比如界面没在前台，没人监听），不能因为通知失败让刷新中断。
+     */
+    fun notifyWeatherChanged(ctx: Context) {
+        runCatching {
+            ctx.sendBroadcast(
+                android.content.Intent(ACTION_WEATHER_CHANGED).setPackage(ctx.packageName)
+            )
+        }.onFailure { android.util.Log.w("LSW", "weather broadcast failed", it) }
     }
 
     fun loadWeather(ctx: Context): Weather? {

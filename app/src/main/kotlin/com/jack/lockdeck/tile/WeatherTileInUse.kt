@@ -30,6 +30,16 @@ object WeatherTileInUse {
     fun marked(ctx: Context): Boolean = Store.prefs(ctx).getBoolean(KEY, false)
 
     /**
+     * 用户已经把它移出控制中心。
+     *
+     * 只清标记、不停服务：通知栏那条刷新链路可能还在用，
+     * 停不停由 [com.jack.lockdeck.notify.WeatherForegroundService] 按开关决定。
+     */
+    fun clear(ctx: Context) {
+        Store.prefs(ctx).edit().putBoolean(KEY, false).apply()
+    }
+
+    /**
      * 请系统让磁贴重新走一遍 [TileService.onStartListening]。
      *
      * 后台刷新完温度变了，但磁贴上还是旧的——因为 TileService 平时根本不会被调用，

@@ -49,6 +49,33 @@ class WeatherTileService : TileService() {
         refreshTile()
     }
 
+    /**
+     * 用户把它拖进控制中心。这是**确切**的「被添加」信号。
+     */
+    override fun onTileAdded() {
+        super.onTileAdded()
+        WeatherTileInUse.mark(this)
+        refreshTile()
+    }
+
+    /**
+     * 用户把它从控制中心移除。
+     *
+     * ## 为什么必须实现
+     *
+     * 老版本只靠 onStartListening 打「还在用」的标记，一旦置 true 就再也
+     * 变不回 false。用户把天气按钮拖走之后，App 仍然以为有人在看，
+     * 于是继续每 5 分钟联网定位一次——纯粹白耗电。
+     *
+     * 这个回调是系统明确告诉我们「已经移除了」的唯一时机，必须接住。
+     * 注意别在这里直接 stopService：通知栏可能还开着，那条刷新链路要留着。
+     * 只清标记，由 [com.jack.lockdeck.notify.WeatherWorker] 那边按需决定。
+     */
+    override fun onTileRemoved() {
+        super.onTileRemoved()
+        WeatherTileInUse.clear(this)
+    }
+
     override fun onClick() {
         super.onClick()
         val trampoline = Intent(this, LaunchTrampolineActivity::class.java).apply {

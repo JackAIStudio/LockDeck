@@ -106,7 +106,51 @@ object WeatherRepo {
         Store.saveWeather(ctx, w)
         // 记下这次用的是哪一级的坐标，设置页会显示，方便判断后台有没有真定位
         Store.prefs(ctx).edit().putString("lastFixSource", got.second.name).apply()
+        trackLocationDegradation(ctx, got.second)
         return Result.Ok(w)
+    }
+
+    /**
+     * 连续多少次「拿不到新位置、只能退到旧坐标」才值得提醒。
+     *
+     * 3 次：按 5 分钟一次算，相当于连续 15 分钟都在用旧位置。
+     * 单次退到 PERSISTED 很常见——刚进电梯、刚开机、地下室，
+     * 一次就弹提示只会变成噪音。
+     */
+    private const val DEGRADE_ALERT_AFTER = 3
+
+    /**
+     * 盯着定位是不是"长期降级"。
+     *
+     * ## 为什么需要它
+     *
+     * 后台定位被用户改回「仅前台」之后，刷新本身**不会报错**，照样返回一份
+     * 看起来正常的天气——只是那份天气是用上次的坐标算的。人一旦走远，
+     * 温度就会安安静静地变成别的地方的，界面上没有任何异常。
+     *
+     * 这种"静默错误"比报错难查得多，所以要主动数：连续 [DEGRADE_ALERT_AFTER]
+     * 次都没拿到新位置，就把原因写进 [Store.setError]，让设置页和通知看得见。
+     * 下次真定位成功，计数清零、错误也清掉。
+     */
+    private fun trackLocationDegradation(ctx: Context, source: FixSource) {
+        val p = Store.prefs(ctx)
+        if (source == FixSource.FRESH) {
+            // 拿到真位置：清零，并把之前那条降级提示撤掉
+            p.edit().putInt("fixDegradeCount", 0).apply()
+            if (Store.getError(ctx)?.contains("后台定位") == true) Store.setError(ctx, null)
+            return
+        }
+        if (source == FixSource.CACHED) return // 系统缓存也算"有位置"，不计数
+
+        val n = p.getInt("fixDegradeCount", 0) + 1
+        p.edit().putInt("fixDegradeCount", n).apply()
+        if (n >= DEGRADE_ALERT_AFTER) {
+            Store.setError(
+                ctx,
+                "后台定位没生效：已经连续 $n 次拿不到新位置，正在用上次的坐标。" +
+                    "去系统设置把定位改成「始终允许」。",
+            )
+        }
     }
 
     /** 给人看的一句话状态，设置页和通知都用它。 */

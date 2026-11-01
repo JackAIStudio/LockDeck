@@ -141,10 +141,29 @@ class WeatherForegroundService : Service() {
         }
     }
 
+    /**
+     * 排下一次刷新：对齐到「整 N 分钟 + 一点偏移」，不是从此刻起数 N 分钟。
+     *
+     * ## 为什么要对齐
+     *
+     * 小米那两个接口是按整 5 分钟推进的（实测 pubTime 依次是 15:25、15:34…）。
+     * 如果我们的轮询落在它更新**之前**（比如 15:24:50），拿到的是上一批数据，
+     * 而且下一次要再等满 5 分钟才有机会纠正——用户看到的就是「比官方慢一拍」。
+     *
+     * 对齐之后每次都在整点后 [ALIGN_OFFSET_MS] 才发请求，稳稳在接口更新之后，
+     * 不会撞在窗口边界上。代价是最多要多等一个间隔的零头，可以接受。
+     */
     private fun scheduleNext() {
         handler.removeCallbacks(tick)
         val minutes = Store.getRefreshMinutes(this).coerceAtLeast(5)
-        handler.postDelayed(tick, minutes * 60_000L)
+        val intervalMs = minutes * 60_000L
+        val now = System.currentTimeMillis()
+
+        // 下一个「整间隔 + 偏移」的时间点
+        val slot = (now / intervalMs + 1) * intervalMs + ALIGN_OFFSET_MS
+        // 刚过偏移点时算出来的可能是过去的时间（比如正好卡在边界），保险起见兜一下
+        val delay = (slot - now).takeIf { it > 0 } ?: intervalMs
+        handler.postDelayed(tick, delay)
     }
 
     /** 在后台线程做一次完整刷新（定位 → 选站 → 抓天气 → 重写通知）。 */
@@ -191,6 +210,14 @@ class WeatherForegroundService : Service() {
          * 说明中间断过，值得立刻补一次；否则只排下一轮。
          */
         private const val STALE_MS = 10 * 60_000L
+
+        /**
+         * 对齐整间隔后多等的这段时间。
+         *
+         * 20 秒：接口在整点那一刻发布，留出一点服务端写入和 CDN 生效的余量。
+         * 太长会让「打开 App 正是该刷新的时候」变成干等。
+         */
+        private const val ALIGN_OFFSET_MS = 20_000L
 
         fun start(ctx: Context) {
             runCatching {

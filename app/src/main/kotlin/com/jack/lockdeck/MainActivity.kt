@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -201,6 +203,24 @@ class MainActivity : ComponentActivity() {
                     var weather by remember { mutableStateOf(Store.loadWeather(ctx)) }
                     var busy by remember { mutableStateOf(false) }
                     var log by remember { mutableStateOf("") }
+
+                    // 跟着缓存走：刷新可能发生在这条 UI 之外（定时循环、点通知进来
+                    // 触发的补刷、磁贴刷新），那些时候界面必须自己重新读一遍，
+                    // 否则通知栏已经是新温度、这一屏还挂着打开那一刻的旧值。
+                    DisposableEffect(ctx) {
+                        val receiver = object : android.content.BroadcastReceiver() {
+                            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                                weather = Store.loadWeather(context)
+                            }
+                        }
+                        androidx.core.content.ContextCompat.registerReceiver(
+                            ctx,
+                            receiver,
+                            android.content.IntentFilter(Store.ACTION_WEATHER_CHANGED),
+                            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+                        )
+                        onDispose { runCatching { ctx.unregisterReceiver(receiver) } }
+                    }
 
                     fun refresh() {
                         busy = true
@@ -448,27 +468,37 @@ class MainActivity : ComponentActivity() {
                             // 这不是「设置项」，是现场验证：HyperOS 按应用决定能不能上锁屏，
                             // 只有真机点亮一次才知道答案，任何参数说明都不如它直接。
                             var checkText by remember { mutableStateOf(LockScreenCheck.summary(ctx)) }
+                            // 默认折叠：这是排查工具，不是天天要看的东西。
+                            // 展开状态记在 remember 里，切走再回来会复位——反而更合适。
+                            var showCheck by remember { mutableStateOf(false) }
                             Card {
                                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                    Text("锁屏可见性自检", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                    Text(
-                                        checkText,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(top = 4.dp),
+                                    CollapsibleHeader(
+                                        title = "锁屏可见性自检",
+                                        hint = if (showCheck) "点收起" else "点展开",
+                                        expanded = showCheck,
+                                        onToggle = { showCheck = !showCheck },
                                     )
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.padding(top = 10.dp),
-                                    ) {
-                                        OutlinedButton(onClick = {
-                                            LockScreenCheck.postProbe(ctx)
-                                            checkText = LockScreenCheck.summary(ctx)
-                                            log = "已发一条自检通知：锁屏点亮看一眼，有就是放行"
-                                        }) { Text("发一条自检通知") }
-                                        TextButton(onClick = {
-                                            checkText = LockScreenCheck.summary(ctx)
-                                        }) { Text("重新读取") }
+                                    if (showCheck) {
+                                        Text(
+                                            checkText,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 4.dp),
+                                        )
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.padding(top = 10.dp),
+                                        ) {
+                                            OutlinedButton(onClick = {
+                                                LockScreenCheck.postProbe(ctx)
+                                                checkText = LockScreenCheck.summary(ctx)
+                                                log = "已发一条自检通知：锁屏点亮看一眼，有就是放行"
+                                            }) { Text("发一条自检通知") }
+                                            TextButton(onClick = {
+                                                checkText = LockScreenCheck.summary(ctx)
+                                            }) { Text("重新读取") }
+                                        }
                                     }
                                 }
                             }
@@ -684,15 +714,18 @@ class MainActivity : ComponentActivity() {
                             // 是「数据源不同」还是「取整方式不同」。这里把接口原始值、
                             // 发布时间、观测站摊开，一眼能判。
                             val cur = weather
+                            var showDiag by remember { mutableStateOf(false) }
                             if (cur != null) {
                                 Card {
                                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                        Text("数据核对", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                        Text(
-                                            "和小米官方对不上时看这里，别看两个整数猜。",
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        CollapsibleHeader(
+                                            title = "数据核对",
+                                            hint = if (showDiag) "点收起"
+                                            else "接口原始值 / 观测站",
+                                            expanded = showDiag,
+                                            onToggle = { showDiag = !showDiag },
                                         )
+                                        if (showDiag) {
                                         Spacer(Modifier.height(8.dp))
                                         DiagRow(
                                             "接口原始值",
@@ -727,6 +760,7 @@ class MainActivity : ComponentActivity() {
                                             fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
+                                        }
                                     }
                                 }
                             }
@@ -740,11 +774,18 @@ class MainActivity : ComponentActivity() {
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                                 )
                             ) {
+                                var showDiagCard by remember { mutableStateOf(false) }
                                 Column(
                                     Modifier.fillMaxWidth().padding(14.dp),
                                     verticalArrangement = Arrangement.spacedBy(4.dp),
                                 ) {
-                                    Text("诊断", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    CollapsibleHeader(
+                                        title = "诊断",
+                                        hint = if (showDiagCard) "点收起" else "权限 / 定位 / 数据源",
+                                        expanded = showDiagCard,
+                                        onToggle = { showDiagCard = !showDiagCard },
+                                    )
+                                    if (showDiagCard) {
                                     val notifPerm = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
                                     Text("通知权限：${if (notifPerm) "已开启" else "未开启"}", fontSize = 11.sp)
                                     Text(
@@ -788,6 +829,7 @@ class MainActivity : ComponentActivity() {
                                     val err = Store.getError(ctx)
                                     if (!err.isNullOrBlank()) {
                                         Text("错误：$err", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                                    }
                                     }
                                 }
                             }
@@ -959,6 +1001,40 @@ private data class PermissionState(
             location = LocationHelper.hasPermission(ctx),
             backgroundLocation = LocationHelper.hasBackgroundPermission(ctx),
             notification = NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
+        )
+    }
+}
+
+/**
+ * 可折叠区块的标题行：左边标题、右边一句「点展开 / 点收起」。
+ *
+ * 用纯文字 + 点击而不是 Material 的 ExpandMore 图标：
+ * 这里没有加载动画的需要，箭头反而要多解释一次「它是能点的」。
+ */
+@Composable
+private fun CollapsibleHeader(
+    title: String,
+    hint: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.weight(1f))
+        Text(
+            hint,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            if (expanded) " ▲" else " ▼",
+            fontSize = 9.sp,
+            color = MaterialTheme.colorScheme.primary,
         )
     }
 }
