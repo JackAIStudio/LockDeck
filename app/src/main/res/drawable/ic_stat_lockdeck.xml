@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    通知小图标（状态栏 / 通知卡左上角那个小剪影）。
+
+    必须满足两条，否则会被系统吞掉或者显示成白方块：
+    1. 纯白单色剪影 —— 系统只读 alpha，再按深浅色主题自己染色，
+       所以这里不能有底色、渐变、描边
+    2. 24dp 视口，字形实际高度 ≤ 22dp —— 超出会被裁
+
+    形状 = App 图标的字母 L，只是按 24dp 的尺子重画了一遍：
+    字形 16.4 × 21.6，笔画 8.0，外角 3.4。
+    这个比例是照着系统图标量的（本机 MIUI 图标实测字形占 42px 槽位的 90%），
+    比直接等比缩小启动图标要显眼，不会窝在角落缩成一小点。
+
+    别用 @mipmap/ic_launcher 当 smallIcon：通知栏只吃单色剪影，
+    彩色的启动图标会被渲染成一整块白方块。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.2,1.5 h1.2 a3.4,3.4 0 0 1 3.4,3.4 v9.2 h4.8 a3.4,3.4 0 0 1 3.4,3.4 v0.6 a3.4,3.4 0 0 1 -3.4,3.4 h-9.4 a3.4,3.4 0 0 1 -3.4,-3.4 v-14.0 a3.4,3.4 0 0 1 3.4,-3.4 z" />
+</vector>

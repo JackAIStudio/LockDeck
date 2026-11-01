@@ -35,6 +35,10 @@ import com.jack.lockdeck.launch.LaunchTrampolineActivity
  *   实测这是折叠的主因，比 importance 影响更大。
  * - **importance 用 LOW**：LOW 不进「静默通知」折叠区，也不响不震。
  *   之前为了「显眼」提到 DEFAULT，反而更吵、还更容易被当垃圾。
+ *   代价是 **LOW 的通知不在状态栏显示图标**（Android 原生行为，不是 MIUI
+ *   特有：下拉栏和通知卡里照常有，只是收起后左上角那里不占位）。
+ *   实测把通道换成 IMPORTANCE_DEFAULT 后，同一个 setSmallIcon 立刻会在
+ *   时间右边出现；但如果想要「安静但常驻」，保持 LOW 才是对的。
  * - **setSilent(true)**：和 LOW 配套，刷新时不吭声。
  * - **前台服务**：普通通知在 HyperOS 上会被降级／限流，只有带
  *   FOREGROUND_SERVICE 标记的常驻通知能稳稳待在左边下拉第一屏。
@@ -144,7 +148,7 @@ object WeatherNotifier {
         val mainAction = Store.getTarget(ctx, "main") ?: QuickAction.openApp(QuickAction.PKG_WEATHER)
 
         return NotificationCompat.Builder(ctx, channelId)
-            .setSmallIcon(R.drawable.ic_stat_weather)
+            .setSmallIcon(R.drawable.ic_stat_lockdeck)
             .setContentTitle(title)
             .setContentText(detail)
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail))

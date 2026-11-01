@@ -1,0 +1,10 @@
+# 生成物不入库：跑 final_L.py / gen_legacy.py 就能重新产出。
+# 入库的只有「源」——生成脚本和 SVG，改几何改脚本，别改产物。
+png/
+tmp/
+
+# 对比/验证图是给人看的临时产物，同样可再生
+compare.png
+in-context.png
+themed-icons.png
+verify-real.png

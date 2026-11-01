@@ -110,7 +110,7 @@ object LockScreenCheck {
             )
         }
         val n = NotificationCompat.Builder(ctx, chId)
-            .setSmallIcon(R.drawable.ic_stat_weather)
+            .setSmallIcon(R.drawable.ic_stat_lockdeck)
             .setContentTitle("锁屏自检")
             .setContentText("看到这条就说明锁屏放行了本应用")
             .setStyle(NotificationCompat.BigTextStyle().bigText("看到这条就说明锁屏放行了本应用"))
