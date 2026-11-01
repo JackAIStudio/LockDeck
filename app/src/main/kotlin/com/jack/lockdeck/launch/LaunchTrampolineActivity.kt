@@ -18,6 +18,13 @@ import com.jack.lockdeck.action.QuickAction
  *   已解锁      -> 立刻跳转，不再有任何等待
  *
  * 全程透明无动画，用户感知上就是「点了就进」。
+ *
+ * ## 不要把「请用户授予权限」这种页面挂在这里
+ *
+ * 权限弹框需要一个用户看得见、并且**不被系统随便收走**的宿主 Activity。
+ * 这一页是 singleTask + noHistory 的透明中间页：系统一旦因为别的窗口把它
+ * 压到后台，Activity 记录就没了，权限弹框会跟着一起消失。所以权限请求
+ * 统一放在 MainActivity（用户点通知进来时，它先补刷再弹框）。
  */
 class LaunchTrampolineActivity : Activity() {
 

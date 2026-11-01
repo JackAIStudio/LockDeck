@@ -63,8 +63,110 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
+    /**
+     * 用户刚从权限弹框回来。
+     *
+     * 这个标记解决的是最容易被误解的一种状态：**有权限但还没数据**。
+     * 没有它的时候，用户点完「允许」看到的仍然是「正在获取天气」，
+     * 很容易以为 App 没修好——实际上只是还差一次刷新 + 反查地名。
+     */
+    private var justGrantedPerms by mutableStateOf(false)
+
+    /**
+     * 权限状态的「版本号」，每次回到这一屏就 +1。
+     *
+     * 权限是在**系统设置页**里才能改的（尤其「始终允许」后台定位），
+     * 改完切回来时 Activity 不会重建。只有让这个值变一下，
+     * 界面才会重新读一遍真实权限并刷新状态。
+     */
+    private var permVersion by mutableStateOf(0)
+
+    override fun onResume() {
+        super.onResume()
+        permVersion++
+    }
+
+    /**
+     * 权限弹框的回调。
+     *
+     * 一次按钮可能连着走两轮：
+     *   1. 前台定位 + 通知（这两个可以一次性要）
+     *   2. 后台定位（Android 11+ 必须单独要，系统会跳到一个专门的设置页）
+     * 用户走完第一步就立刻补刷一次，不让界面停在「正在获取天气」。
+     */
     private val permsLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+            permVersion++
+            if (!LocationHelper.hasPermission(this)) {
+                // 用户点了「不允许」。把后果和下一步写清楚，别让他对着「正在获取天气」猜。
+                Store.setError(this, "定位权限被拒绝——天气需要知道你所在的城市才能显示")
+                justGrantedPerms = false
+                return@registerForActivityResult
+            }
+            justGrantedPerms = true
+            Store.setError(this, null)
+            runCatching { WeatherForegroundService.refreshNow(this) }
+            // 前台拿到了、后台还没有：同一颗按钮继续走第二步
+            if (!LocationHelper.hasBackgroundPermission(this)) requestBackgroundLocation()
+        }
+
+    /**
+     * 第二步：单独申请「始终允许」后台定位。
+     *
+     * 为什么必须单独要：Android 11+ 规定 `ACCESS_BACKGROUND_LOCATION`
+     * 不能和前台定位放在同一个 requestPermissions 里，混在一起系统会整组拒绝。
+     * 单独要时系统不弹普通授权框，而是把用户带到本 App 的定位设置页，
+     * 让用户自己选「始终允许」。
+     */
+    private fun requestBackgroundLocation() {
+        runCatching {
+            permsLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+        }.onFailure {
+            // 个别 ROM 直接不支持这个入口：退回到应用设置页，让用户自己点进去
+            openAppSettings()
+        }
+    }
+
+    /**
+     * 一键申请：把天气要用到的权限一次走完。
+     *
+     * 顺序是死的，不能反：**先前台、再后台**。
+     * 后台定位是前台定位的「加强档」，前台还没给的时候申请后台，系统直接忽略。
+     */
+    private fun requestAllPermissions() {
+        // buildList 里的 this 是列表，不是 Activity，所以上下文先存一份
+        val ctx = this
+        val hasLocation = LocationHelper.hasPermission(ctx)
+        val hasBackground = LocationHelper.hasBackgroundPermission(ctx)
+
+        // 先要「前台级」的：定位 + 通知，这两个可以放在同一次请求里
+        val need = buildList {
+            if (!hasLocation) {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
+            if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (need.isNotEmpty()) {
+            permsLauncher.launch(need.toTypedArray())
+            return
+        }
+        // 前台级都齐了，只剩后台那档：这一档系统不让和前台混在一次里要
+        if (!hasBackground) requestBackgroundLocation() else openAppSettings()
+    }
+
+    private fun openAppSettings() {
+        runCatching {
+            startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", packageName, null),
+                )
+            )
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,6 +187,13 @@ class MainActivity : ComponentActivity() {
         if (foreignPurged) {
             runCatching { WeatherForegroundService.refreshNow(this) }
         }
+        // 通知上写着「点开可手动刷新」——那就必须真的刷一次。
+        //
+        // 旧版点进来什么都不做：用户点完看不到任何变化，只能再点、再退、再进，
+        // 最后判断成「点了没用」。没有缓存时刷是刚需；有缓存但已经旧了也该刷，
+        // 否则「点开」只是把同一份旧数据重画一遍。
+        refreshOnOpen()
+        ensureLocationAccess()
         setContent {
             LockDeckTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -118,7 +227,7 @@ class MainActivity : ComponentActivity() {
                             Text("锁屏快捷台", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                             Text(
                                 "通知栏：一条常驻天气信息，和解锁后的其它通知长一个样；" +
-                                    "控制中心：天气 + 两个自定义磁贴。两个地方各管各的，不重叠。",
+                                    "控制中心：三个按钮（天气 + 两个自定义功能）。两个地方各管各的，不重叠。",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -210,6 +319,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
+
+                            // ---------- 权限 ----------
+                            // 放在最上面第二屏的位置：天气卡片一旦停在「正在获取天气」，
+                            // 用户第一件想知道的事就是「我是不是少给了什么」。
+                            // 不管有没有申请过都显示真实状态。
+                            PermissionCard(
+                                version = permVersion,
+                                justGranted = justGrantedPerms,
+                                onRequestAll = { requestAllPermissions() },
+                                onOpenSettings = { openAppSettings() },
+                            )
 
                             // ---------- 未来 24 小时曲线 ----------
                             val hours = weather?.hourly.orEmpty()
@@ -458,17 +578,27 @@ class MainActivity : ComponentActivity() {
 
                             HorizontalDivider()
 
-                            // ---------- 控制中心磁贴 ----------
-                            Text("控制中心磁贴", fontWeight = FontWeight.Medium)
+                            // ---------- 控制中心按钮 ----------
+                            // 名字统一叫「按钮」：系统文档里的 tile 直译成「磁贴」，
+                            // 听起来像贴纸，没人知道它其实是「点一下执行动作」。
+                            Text("控制中心按钮", fontWeight = FontWeight.Medium)
                             Text(
-                                "扫一扫、收付款都放在这里——下拉控制中心点一下就走。" +
-                                    "HyperOS 的磁贴只显示图标，不显示文字。",
+                                "下拉控制中心那两排圆角方块，就是这里说的「按钮」。" +
+                                    "系统里把它们叫 Quick Settings tile，中文 ROM 译作「磁贴」——" +
+                                    "意思就是：点一下直接执行一个功能，不用先打开 App。" +
+                                    "天气固定占一格，另外两格功能你自己选。",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             TargetRow(
-                                title = "磁贴 1",
-                                desc = "控制中心点它 -> 运行",
+                                title = "天气",
+                                desc = "固定功能：显示当前温度，点开进天气 App",
+                                current = QuickAction.openApp(QuickAction.PKG_WEATHER),
+                                onPick = null,
+                            )
+                            TargetRow(
+                                title = "快捷按钮 ①",
+                                desc = "控制中心点它 → 执行下面这个功能",
                                 current = Store.getTileAction(ctx, 1),
                                 onPick = {
                                     ctx.startActivity(
@@ -477,8 +607,8 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                             TargetRow(
-                                title = "磁贴 2",
-                                desc = "控制中心点它 -> 运行",
+                                title = "快捷按钮 ②",
+                                desc = "控制中心点它 → 执行下面这个功能",
                                 current = Store.getTileAction(ctx, 2),
                                 onPick = {
                                     ctx.startActivity(
@@ -487,8 +617,8 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                             TargetRow(
-                                title = "通知点开后打开",
-                                desc = "点通知栏那条天气 -> 打开",
+                                title = "点通知栏那条天气",
+                                desc = "点开通知之后打开什么",
                                 current = Store.getTarget(ctx, "main") ?: QuickAction.openApp(QuickAction.PKG_WEATHER),
                                 onPick = {
                                     ctx.startActivity(
@@ -496,37 +626,39 @@ class MainActivity : ComponentActivity() {
                                     )
                                 },
                             )
+
+                            // 系统只允许「请求添加」，最终点不点添加是用户的事（Android 13+）。
+                            // Android 12 及以下没有这个 API，只能手动编辑——两条路都写在按钮下面。
                             OutlinedButton(
                                 onClick = {
-                                    // 系统只允许应用主动请求添加一次（Android 13+）。
-                                    // HyperOS 上系统弹窗不一定出现，所以失败时给手动路径。
-                                    val ok = runCatching {
-                                        val sbm = ctx.getSystemService(android.app.StatusBarManager::class.java)
-                                        sbm?.requestAddTileService(
-                                            android.content.ComponentName(
-                                                ctx,
-                                                com.jack.lockdeck.tile.Tile1Service::class.java,
-                                            ),
-                                            "磁贴 1",
-                                            android.graphics.drawable.Icon.createWithResource(
-                                                ctx,
-                                                R.drawable.ic_tile_scan_alipay,
-                                            ),
-                                            ctx.mainExecutor,
-                                        ) { _ -> }
-                                        sbm != null
-                                    }.getOrDefault(false)
-                                    log = if (ok) {
-                                        "系统弹出确认框时点「添加」；之后可下拉控制中心 -> 编辑 调整位置"
+                                    val sent = com.jack.lockdeck.tile.TileCatalog.items.count {
+                                        com.jack.lockdeck.tile.TileCatalog.requestAdd(ctx, it)
+                                    }
+                                    log = if (sent > 0) {
+                                        "已请求添加 $sent 个按钮：系统弹出确认框时点「添加」。" +
+                                            "没弹框就直接下拉控制中心 → 点「编辑」→ 从下面把按钮拖到上面。"
                                     } else {
-                                        "请下拉控制中心 -> 点「编辑」-> 把「磁贴 1 / 磁贴 2 / 天气」拖到上面"
+                                        "这台机器的系统版本不支持应用直接请求添加。" +
+                                            "请下拉控制中心 → 点「编辑」→ 把「天气 / 快捷按钮 ① / 快捷按钮 ②」拖到上面。"
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) { Text("把磁贴 1 添加到控制中心") }
+                            ) { Text("把这三个按钮加到控制中心") }
+                            Text(
+                                "手动路径：下拉控制中心 → 点「编辑」（或长按空白处）→ " +
+                                    "在下方的按钮列表里找「天气」「快捷按钮 ①」「快捷按钮 ②」→ " +
+                                    "按住拖到上面两排即可。控制中心里显示全部是系统自己染的白色剪影，" +
+                                    "不显示名字，所以这里用不同形状区分。",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
 
                             HorizontalDivider()
 
+                            // ---------- 立即刷新 ----------
+                            // 放在最显眼的位置（不折叠、不藏进菜单），
+                            // 因为它是「验证 API 准不准」唯一的可操作手段：
+                            // 点一下 → 立刻重新定位、重新请求、把原始值摆出来对比。
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(
                                     onClick = { refresh() },
@@ -547,16 +679,57 @@ class MainActivity : ComponentActivity() {
                                 ) { Text("刷新通知") }
                             }
 
-                            TextButton(
-                                onClick = {
-                                    permsLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.POST_NOTIFICATIONS,
-                                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                            // ---------- 数据核对 ----------
+                            // 用户拿我们和小米官方 App 对温度时，只看两个整数分不清
+                            // 是「数据源不同」还是「取整方式不同」。这里把接口原始值、
+                            // 发布时间、观测站摊开，一眼能判。
+                            val cur = weather
+                            if (cur != null) {
+                                Card {
+                                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                        Text("数据核对", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        Text(
+                                            "和小米官方对不上时看这里，别看两个整数猜。",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
-                                    )
-                                },
-                            ) { Text("授予通知与定位权限") }
+                                        Spacer(Modifier.height(8.dp))
+                                        DiagRow(
+                                            "接口原始值",
+                                            if (cur.tempRaw.isNotBlank()) "${cur.tempRaw}°"
+                                            else "（这个源不给原始值）",
+                                        )
+                                        DiagRow("界面显示", "${cur.tempNow}°（四舍五入）")
+                                        DiagRow(
+                                            "观测发布时间",
+                                            // 接口给的是 2026-11-01T15:34:22+08:00，太长且不好读。
+                                            // 只留「今天 15:34」这一段，和抓取时间并排比才有意义。
+                                            cur.pubTime
+                                                .substringAfter('T', cur.pubTime)
+                                                .take(5)
+                                                .takeIf { it.length == 5 && cur.pubTime.isNotBlank() }
+                                                ?.let { "今天 $it" }
+                                                ?: cur.pubTime.ifBlank { "源未提供" },
+                                        )
+                                        DiagRow(
+                                            "抓取时间",
+                                            SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault())
+                                                .format(Date(cur.updatedAt)),
+                                        )
+                                        if (cur.stationInfo.isNotBlank()) {
+                                            DiagRow("实况观测站", cur.stationInfo)
+                                        }
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            "小米官方 App 用同一套后端，但它按更细的定位选站；" +
+                                                "相邻两个区落到不同站时，差 1 度是正常的。" +
+                                                "如果「观测发布时间」停在很久以前，那才是刷新没生效。",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
 
                             if (log.isNotBlank()) {
                                 Text(log, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
@@ -623,6 +796,187 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 用户点通知进来时，真的补刷一次。
+     *
+     * 通知正文在没有数据时写的是「点开可手动刷新」，那就得兑现这句话。
+     * 两个条件任何一个满足就刷：
+     *   - 还没有任何缓存（界面停在「正在获取天气」，除了刷没别的出路）
+     *   - 缓存已经超过一个刷新间隔（点开只看旧数据等于没点）
+     *
+     * 走的是前台服务那条刷新链路，和手动点「立即刷新」完全一样，
+     * 不额外开线程、也不会和定时器撞车。
+     */
+    private fun refreshOnOpen() {
+        if (!LocationHelper.hasPermission(this)) return
+        val w = Store.loadWeather(this)
+        val staleAfter = Store.getRefreshMinutes(this) * 60_000L
+        val need = w == null || System.currentTimeMillis() - w.updatedAt > staleAfter
+        if (need) runCatching { WeatherForegroundService.refreshNow(this) }
+    }
+
+    /**
+     * 进这一屏时把「还差哪种定位」问清楚。
+     *
+     * 只在真的没有前台定位时才弹系统框——有权限的用户不该每次开 App 都吃一个弹框。
+     * 后台那一档不在这里自动弹：它要跳到系统设置页，属于「用户自己决定」的事，
+     * 做成设置页里的一行状态 + 一颗按钮更合适。
+     */
+    private fun ensureLocationAccess() {
+        if (LocationHelper.hasPermission(this)) return
+        permsLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            )
+        )
+    }
+}
+
+/**
+ * 权限卡片：每一项都显示**真实状态**，并提供当下该做的那一下。
+ *
+ * ## 为什么状态必须常显
+ *
+ * 「正在获取天气」有两种完全不同的原因：没给定位、或者给了但还没抓回来。
+ * 界面上分不清这两者时，用户只能反复点、反复重启，不知道该去改哪里。
+ * 所以这张卡不看「有没有点过申请」——权限是什么样就显示什么样。
+ *
+ * ## 为什么不能全自动
+ *
+ * 定位和通知都是**危险权限**，弹框必须由用户点；「始终允许」后台定位
+ * 更是只能由用户去系统设置页里选。App 能做的是把顺序排好、把状态摊开、
+ * 把路径写成一句话，而不是绕过系统。
+ */
+@Composable
+private fun PermissionCard(
+    version: Int,
+    justGranted: Boolean,
+    onRequestAll: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    // version 是刷新触发器：从系统设置页改完权限切回来时，靠它重新读一遍真实值
+    val state = remember(version) { PermissionState.read(ctx) }
+
+    Card {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("权限", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (state.allGood) "已齐全" else "还差 ${state.missingCount} 项",
+                    fontSize = 11.sp,
+                    color = if (state.allGood) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error,
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            PermissionRow(
+                name = "定位",
+                granted = state.location,
+                detail = if (state.location) "已允许" else "没有它取不到你所在的城市，天气会一直停在「正在获取」",
+            )
+            PermissionRow(
+                name = "后台定位",
+                granted = state.backgroundLocation,
+                detail = if (state.backgroundLocation) "始终允许"
+                else if (!state.location) "先给上面的定位，再来给这一项"
+                else "只允许「使用 App 时」。后台刷新会退回上次的位置，人走远了温度会不对",
+            )
+            PermissionRow(
+                name = "通知",
+                granted = state.notification,
+                detail = if (state.notification) "已开启"
+                else "没有它常驻天气挂不出来，控制中心以外就看不到天气",
+            )
+
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onRequestAll, modifier = Modifier.weight(1f)) {
+                    Text(
+                        when {
+                            // 「始终允许」系统不让 App 直接弹，只能把人送到设置页
+                            state.needsOnlyBackground -> "去开启「始终允许」"
+                            state.allGood -> "权限都齐了"
+                            else -> "一键申请权限"
+                        }
+                    )
+                }
+                OutlinedButton(onClick = onOpenSettings) { Text("系统设置") }
+            }
+
+            if (justGranted && state.location && !state.allGood) {
+                Text(
+                    "定位已给。只剩「后台定位」——下拉控制中心或打开 App 都会刷一次，" +
+                        "但关掉 App 后要靠它才不会退回旧位置。",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 一行权限状态：左边是什么、右边给没给。 */
+@Composable
+private fun PermissionRow(name: String, granted: Boolean, detail: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            if (granted) "✓" else "✕",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            modifier = Modifier.width(18.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(detail, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** 一次读取当前所有权限的真实状态。 */
+private data class PermissionState(
+    val location: Boolean,
+    val backgroundLocation: Boolean,
+    val notification: Boolean,
+) {
+    val allGood: Boolean get() = location && backgroundLocation && notification
+    val missingCount: Int get() = listOf(location, backgroundLocation, notification).count { !it }
+    val needsOnlyBackground: Boolean get() = location && !backgroundLocation
+
+    companion object {
+        fun read(ctx: android.content.Context) = PermissionState(
+            location = LocationHelper.hasPermission(ctx),
+            backgroundLocation = LocationHelper.hasBackgroundPermission(ctx),
+            notification = NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
+        )
+    }
+}
+
+/** 诊断面板里的一行「标签 → 值」。 */
+@Composable
+private fun DiagRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(88.dp),
+        )
+        Text(value, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
 

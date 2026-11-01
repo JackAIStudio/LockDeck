@@ -121,6 +121,9 @@ object XiaomiWeatherApi {
             hourly = hours,
             daily = dayList,
             source = WeatherSource.XIAOMI,
+            tempRaw = current.optJSONObject("temperature")?.optString("value").orEmpty(),
+            pubTime = current.optString("pubTime").orEmpty(),
+            stationInfo = stationOf(json),
         )
     }
 
@@ -251,6 +254,35 @@ object XiaomiWeatherApi {
     private fun resolveDistrictName(json: JSONObject, lat: Double, lon: Double): String {
         // 响应本身没有地名（实测 locationKey 之外啥都没有），只能另查
         return resolveDistrict(lat, lon)
+    }
+
+    /**
+     * 这次实况用的是哪个观测站。
+     *
+     * `sourceMaps.current.temperature` 的形如 `weatherbj(locationKey=101210710)`：
+     *   - weatherbj = 北京气象局供的数（小米聚合了多家）
+     *   - locationKey = 中国天气网的城市码，同一个码才是同一个站
+     *
+     * 小米官方 App 也读这个接口，但它在自己那边按「更细的定位」选站；
+     * 我们从系统拿到的坐标（尤其室内是基站定位）可能落到隔壁站，
+     * 于是出现 1 度差。把站码显示出来，「对不上」就变成了可解释的事。
+     */
+    private fun stationOf(json: JSONObject): String {
+        val raw = json.optJSONObject("sourceMaps")
+            ?.optJSONObject("current")
+            ?.optString("temperature")
+            .orEmpty()
+        if (raw.isBlank()) return ""
+        // weatherbj(locationKey=101210710) -> 北京气象局 · 101210710
+        val provider = raw.substringBefore('(')
+        val key = raw.substringAfter("locationKey=", "").substringBefore(')')
+        val providerName = when (provider) {
+            "weatherbj" -> "北京气象局"
+            "caiyun" -> "彩云天气"
+            "moji" -> "墨迹天气"
+            else -> provider
+        }
+        return if (key.isBlank()) providerName else "$providerName · $key"
     }
 
     private fun optInt(o: JSONObject?): Int? {

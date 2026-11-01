@@ -31,13 +31,13 @@ import com.jack.lockdeck.notify.WeatherNotifier
 import com.jack.lockdeck.ui.theme.LockDeckTheme
 
 /**
- * 选择某个点击区（或磁贴）要跑哪个动作。
+ * 选择某个点击区（或控制中心按钮）要跑哪个动作。
  *
  * 分两段：
  *   1. 内置动作 —— 支付宝扫一扫、微信扫一扫这类一步到位的
  *   2. 任意 App  —— 从已安装应用里挑一个
  *
- * 现在只有控制中心磁贴（tile1 / tile2）和「通知点开后打开」（main）会进来。
+ * 现在只有控制中心按钮（tile1 / tile2）和「通知点开后打开」（main）会进来。
  * 锁屏浮层那套三区（main / app1 / app2）已经删了，只剩 main 还在用。
  */
 class PickerActivity : ComponentActivity() {
@@ -88,8 +88,8 @@ class PickerActivity : ComponentActivity() {
                                 Text(
                                     when {
                                         zone == "main" -> "绑到：点通知栏那条天气之后打开"
-                                        zone == "tile1" -> "绑到：控制中心 · 磁贴 1"
-                                        zone == "tile2" -> "绑到：控制中心 · 磁贴 2"
+                                        zone == "tile1" -> "绑到：控制中心 · 快捷按钮 ①"
+                                        zone == "tile2" -> "绑到：控制中心 · 快捷按钮 ②"
                                         else -> "绑到：$zone"
                                     },
                                     fontSize = 12.sp,

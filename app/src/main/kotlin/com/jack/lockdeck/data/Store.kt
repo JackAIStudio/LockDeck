@@ -42,6 +42,12 @@ object Store {
             .putString("text", w.text)
             .putString("src", w.source.name)
             .putLong("at", w.updatedAt)
+            // 诊断用：接口原始值、发布时间、观测站。缺了就清掉，别留上一次的误导人。
+            .apply {
+                if (w.tempRaw.isBlank()) remove("tempRaw") else putString("tempRaw", w.tempRaw)
+                if (w.pubTime.isBlank()) remove("pubTime") else putString("pubTime", w.pubTime)
+                if (w.stationInfo.isBlank()) remove("station") else putString("station", w.stationInfo)
+            }
             // 以下是小米源才有的东西，没有就不写（留着旧值比写 null 好读）
             .apply {
                 w.feelsLike?.let { putInt("feels", it) } ?: remove("feels")
@@ -82,6 +88,9 @@ object Store {
             hourly = HourCodec.decode(p.getString("hoursJson", null)),
             daily = DayCodec.decode(p.getString("daysJson", null)),
             source = WeatherSource.fromName(p.getString("src", null)),
+            tempRaw = p.getString("tempRaw", "").orEmpty(),
+            pubTime = p.getString("pubTime", "").orEmpty(),
+            stationInfo = p.getString("station", "").orEmpty(),
         )
     }
 
@@ -98,7 +107,7 @@ object Store {
         sp(ctx).edit().apply { if (id.isNullOrBlank()) remove("tgt_$zone") else putString("tgt_$zone", id) }.apply()
     }
 
-    // ---- 控制中心磁贴 ----
+    // ---- 控制中心按钮（系统里叫 Quick Settings tile）----
     fun getTileAction(ctx: Context, slot: Int): String =
         sp(ctx).getString("tile_$slot", null) ?: defaultTileAction(slot)
 
@@ -108,7 +117,7 @@ object Store {
         }.apply()
     }
 
-    /** 磁贴 1 / 2 的出厂默认：支付宝扫一扫、微信扫一扫 */
+    /** 快捷按钮 ① / ② 的出厂默认：支付宝扫一扫、微信扫一扫 */
     fun defaultTileAction(slot: Int): String = when (slot) {
         1 -> com.jack.lockdeck.action.QuickAction.ALIPAY_SCAN
         2 -> com.jack.lockdeck.action.QuickAction.WECHAT_SCAN
@@ -183,6 +192,7 @@ object Store {
             .remove("src").remove("feels").remove("hum").remove("pres").remove("uv")
             .remove("wdir").remove("wspd").remove("aqiJson").remove("rainJson")
             .remove("hoursJson").remove("daysJson")
+            .remove("tempRaw").remove("pubTime").remove("station")
             .apply()
         return true
     }

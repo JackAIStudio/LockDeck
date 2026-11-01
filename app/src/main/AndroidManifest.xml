@@ -58,12 +58,18 @@
             android:exported="false"
             android:label="选择动作" />
 
-        <!-- 控制中心磁贴：两个槽位，动作在 App 里改 -->
+        <!--
+            控制中心按钮：两个槽位，功能在 App 里自己选。
+
+            android:label 是用户在控制中心「编辑」列表里看到的文字，
+            所以这里必须写人话。旧版叫「磁贴 1 / 磁贴 2」——
+            「磁贴」是 Quick Settings tile 的直译，没人看得懂它是干什么的。
+        -->
         <service
             android:name=".tile.Tile1Service"
             android:exported="true"
             android:icon="@drawable/ic_tile_scan_alipay"
-            android:label="磁贴 1"
+            android:label="快捷按钮 ①"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
@@ -74,7 +80,7 @@
             android:name=".tile.Tile2Service"
             android:exported="true"
             android:icon="@drawable/ic_tile_scan_wechat"
-            android:label="磁贴 2"
+            android:label="快捷按钮 ②"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
@@ -92,7 +98,7 @@
             android:launchMode="singleTask"
             android:theme="@style/Theme.Transparent" />
 
-        <!-- 天气磁贴：右侧下拉直接看温度 -->
+        <!-- 天气按钮：下拉控制中心直接看温度 -->
         <service
             android:name=".tile.WeatherTileService"
             android:exported="true"

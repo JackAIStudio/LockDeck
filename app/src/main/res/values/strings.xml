@@ -1,4 +1,4 @@
 <resources>
-    <!-- App 名：它不只天气，还有通知栏常驻和三个控制中心磁贴 -->
+    <!-- App 名：它不只天气，还有通知栏常驻和三个控制中心按钮 -->
     <string name="app_name">锁屏快捷台</string>
 </resources>
