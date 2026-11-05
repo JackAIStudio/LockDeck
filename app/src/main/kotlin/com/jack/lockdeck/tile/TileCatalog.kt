@@ -12,7 +12,7 @@ import android.util.Log
 import com.jack.lockdeck.R
 
 /**
- * 控制中心里那三个按钮。
+ * 控制中心里那四个按钮。
  *
  * ## 先把名字说清楚
  *
@@ -45,7 +45,7 @@ object TileCatalog {
     /**
      * 一个可添加的控制中心按钮。
      *
-     * @param slot 0 = 固定天气；1 / 2 = 可自定义功能的两个槽位
+     * @param slot 0 = 当前温度；3 = 今日高低温；1 / 2 = 可自定义功能的两个槽位
      */
     data class Item(
         val slot: Int,
@@ -60,9 +60,16 @@ object TileCatalog {
         Item(
             slot = SLOT_WEATHER,
             name = "天气",
-            summary = "固定功能：显示当前温度，点开进天气 App",
+            summary = "固定功能：当前温度，点一下刷新",
             iconRes = R.drawable.ic_tile_weather,
             serviceClass = WeatherTileService::class.java,
+        ),
+        Item(
+            slot = SLOT_RANGE,
+            name = "今日高低温",
+            summary = "固定功能：今日最高 / 最低温，点一下刷新",
+            iconRes = R.drawable.ic_tile_range,
+            serviceClass = RangeTileService::class.java,
         ),
         Item(
             slot = 1,
@@ -80,8 +87,16 @@ object TileCatalog {
         ),
     )
 
-    /** 天气按钮的槽位号。它没有可配置的动作，固定打开天气 App。 */
+    /**
+     * 当前温度按钮的槽位号。它没有可配置的动作，点一下刷新。
+     *
+     * 槽位号 3 给「今日高低温」——它排在 1 / 2 两个自定义槽位之后，
+     * 但显示顺序（[items]）里紧跟天气，因为它们是同一件事的两半。
+     */
     const val SLOT_WEATHER = 0
+
+    /** 今日高低温按钮的槽位号。它同样没有可配置的动作。 */
+    const val SLOT_RANGE = 3
 
     fun itemOf(slot: Int): Item? = items.firstOrNull { it.slot == slot }
 

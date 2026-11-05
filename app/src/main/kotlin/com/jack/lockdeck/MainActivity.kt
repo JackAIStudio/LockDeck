@@ -247,7 +247,7 @@ class MainActivity : ComponentActivity() {
                             Text("锁屏快捷台", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                             Text(
                                 "通知栏：一条常驻天气信息，和解锁后的其它通知长一个样；" +
-                                    "控制中心：三个按钮（天气 + 两个自定义功能）。两个地方各管各的，不重叠。",
+                                    "控制中心：四个按钮（当前温度 + 今日高低温 + 两个自定义功能）。两个地方各管各的，不重叠。",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -657,13 +657,19 @@ class MainActivity : ComponentActivity() {
                                 "下拉控制中心那两排圆角方块，就是这里说的「按钮」。" +
                                     "系统里把它们叫 Quick Settings tile，中文 ROM 译作「磁贴」——" +
                                     "意思就是：点一下直接执行一个功能，不用先打开 App。" +
-                                    "天气固定占一格，另外两格功能你自己选。",
+                                    "天气相关的有两个：当前温度、今日高低温。另外两格功能你自己选。",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             TargetRow(
                                 title = "天气",
-                                desc = "固定功能：显示当前温度，点开进天气 App",
+                                desc = "固定功能：当前温度（大号），点一下刷新",
+                                current = QuickAction.openApp(QuickAction.PKG_WEATHER),
+                                onPick = null,
+                            )
+                            TargetRow(
+                                title = "今日高低温",
+                                desc = "固定功能：今日最高 / 最低温，点一下刷新。",
                                 current = QuickAction.openApp(QuickAction.PKG_WEATHER),
                                 onPick = null,
                             )
@@ -710,14 +716,14 @@ class MainActivity : ComponentActivity() {
                                             "没弹框就直接下拉控制中心 → 点「编辑」→ 从下面把按钮拖到上面。"
                                     } else {
                                         "这台机器的系统版本不支持应用直接请求添加。" +
-                                            "请下拉控制中心 → 点「编辑」→ 把「天气 / 快捷按钮 ① / 快捷按钮 ②」拖到上面。"
+                                            "请下拉控制中心 → 点「编辑」→ 把「天气 / 今日高低温 / 快捷按钮 ① / 快捷按钮 ②」拖到上面。"
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) { Text("把这三个按钮加到控制中心") }
+                            ) { Text("把这些按钮加到控制中心") }
                             Text(
                                 "手动路径：下拉控制中心 → 点「编辑」（或长按空白处）→ " +
-                                    "在下方的按钮列表里找「天气」「快捷按钮 ①」「快捷按钮 ②」→ " +
+                                    "在下方的按钮列表里找「天气」「今日高低温」「快捷按钮 ①」「快捷按钮 ②」→ " +
                                     "按住拖到上面两排即可。控制中心里显示全部是系统自己染的白色剪影，" +
                                     "不显示名字，所以这里用不同形状区分。",
                                 fontSize = 10.sp,

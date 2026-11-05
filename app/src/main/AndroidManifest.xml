@@ -87,6 +87,24 @@
             </intent-filter>
         </service>
 
+        <!--
+          今日高低温按钮。
+
+          单独占一格，不是把天气那个按钮拆成两半——格子的面积由系统定死
+          （96×96px，见 WeatherTileService 里那张实测表），一个格子里塞不下
+          「当前温度 + 最高 + 最低」还想让人看清。多占一格是唯一的路。
+        -->
+        <service
+            android:name=".tile.RangeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_range"
+            android:label="今日高低温"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- 从锁屏跳转目标 App 的透明中间页：主动请求解锁，避免"点了要手动上滑" -->
         <activity
             android:name=".launch.LaunchTrampolineActivity"

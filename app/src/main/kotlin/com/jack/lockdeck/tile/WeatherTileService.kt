@@ -190,10 +190,10 @@ class WeatherTileService : TileService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // subtitle 在 HyperOS 上不显示，但原生 Android 和 MIUI 编辑器里能看到，
                 // 所以照填——这里放的是比「温度」更值得占用一行的那句话。
-                tile.subtitle = buildString {
-                    append(w.tempMin).append("°~").append(w.tempMax).append("°")
-                    if (w.place.isNotBlank()) append(" · ").append(w.place)
-                }
+                // 高低温不写在这里：它已经是隔壁那个按钮的全部内容（RangeTileService）。
+                // 两个地方都说同一件事，用户会以为看到了两条重复信息。
+                tile.subtitle = if (w.place.isNotBlank()) w.description + " · " + w.place
+                else w.description
             }
             // 关键：内容画进位图。HyperOS 只认图标这一层（见类注释）。
             tile.icon = Icon.createWithBitmap(contentBitmap(w))
@@ -202,71 +202,96 @@ class WeatherTileService : TileService() {
     }
 
     /**
-     * 把「当前温度 + 今日高低温」画成图标位图。
+     * 把「当前温度」画成图标位图——只画这一个数。
      *
-     * ## 尺寸是量出来的，不是估的
+     * ## 为什么把高低温挪走了
      *
-     * HyperOS 的控制中心把整张位图**缩放到约 96px（29.5dp）**再画进圆圈里，
-     * 无论画布做多大都一样（实测 192 和 384 画出来都是 96px），
-     * 也不会被裁——所以画布保持 192、内容按比例排，交给系统缩。
+     * 原来这里塞了三样：当前温度、今日最低、今日最高。在 96px 的框里，
+     * 高低温只能压到 **11px 高**，一瞥根本读不出来——那行字等于白占地方。
      *
-     * 代价是：29.5dp 里放两行字，下面那行只能到 ~7dp 高。这是硬上限，
-     * 想更大只能指望 MIUI 哪天给第三方开大号磁贴，客户端做不到。
+     * 格子的面积是系统定死的（见下面那张实测表），想更大只能**多占一格**。
+     * 所以高低温独立成了 [RangeTileService]：这边只留当前温度，字号顶到
+     * 满高的 80%；那边两行数字各占半格，字号一样大。代价是控制中心多一格——
+     * 这是权衡过的取舍，不是实现不了。
      *
-     * ## 版式
+     * ## 尺寸是实测的，三个数字定死了版式
      *
-     * ```
-     *   24°     <- 当前温度，粗体，占大部分高度
-     * 19° 25°   <- 今日最低 / 最高，细一点
-     * ```
+     * 用「涂满一块、看系统画出来多大」的校准图量过（HyperOS 3 / Redmi Turbo 5）：
      *
-     * 高低温之间留一个空格而不是「/」或「~」：空格在这么小的字下更透气，
-     * 「19°/25°」在 96px 里会糊成一团。
+     * | 事实 | 实测 |
+     * |---|---|
+     * | 图标可用区 | **96×96px** 的正方形，居中在 220px 的磁贴圆圈里 |
+     * | 会不会裁 | 不裁，四角完整 |
+     * | 非正方形位图 | **被强行压成正方形**（384×192 的图渲染成 96×96），不是等比缩放，也不是按宽度铺满 |
+     * | 颜色 | 纯红渲染成纯白——整个位图被染成单色，彩色没有意义 |
+     * | alpha | **保留**。128 的半透明白渲染成浅灰 |
      *
-     * 纯白：HyperOS 会把图标整体染成白色，画彩色没意义（见类注释）。
+     * 前三条合起来是硬上限：**能用的就这 96×96**，做不成参考图那种宽卡片
+     * （要不要宽卡片得看 MIUI 给不给第三方开双格大磁贴，客户端决定不了）。
+     * 最后一条是白捡的：正因为 alpha 活着，想画「浅一档」的东西才画得出来。
+     *
+     * 版式因此是**按 96px 反推**的，不是照抄设计稿比例。
      */
     private fun contentBitmap(w: Weather): Bitmap {
-        val size = 192
+        // 直接按系统的 96px 画，再交给它 1:1 缩放。画大再缩没有额外收益
+        // （实测 192 和 384 出来都是 96），反而多一次重采样把边缘磨糊。
+        val size = TILE_ICON_PX
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
+        val cx = size * 0.5f
+        val cy = size * 0.5f
 
-        val bold = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        val normal = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-
-        // 第一行：当前温度。负数（-12°）比两位数长，字号要跟着收，
-        // 否则贴到左右边缘会被系统留的边距切掉。
-        val nowText = "${w.tempNow}°"
+        // ---- 当前温度：只有数字 ----
+        //
+        // 不画「°」：控制中心这一格本来就知道是温度，那个小圈除了占宽度
+        // 没有别的用处——去掉之后宽度约束整个消失，字号只受格子高度限制，
+        // 能一直顶到满格。
+        //
+        // 用**字形紧边界**算尺寸和居中（getTextBounds），不是 fontMetrics：
+        // fontMetrics 给的是整行行距，里面一大截是留白，拿它限制高度会让
+        // 数字白白小一圈（高低温那格实测就掉到 24px，改紧边界后翻倍）。
+        val nowText = w.tempNow.toString()
         val nowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            typeface = bold
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
-            textSize = when {
-                nowText.length <= 3 -> size * 0.44f   // 24°
-                nowText.length == 4 -> size * 0.38f   // -5°
-                else -> size * 0.32f                  // -12°
-            }
+            textSize = size * 1.10f
         }
-        // 基线：第一行中心放在 y = 38% 高度处
-        val fmNow = nowPaint.fontMetrics
-        val nowCenterY = size * 0.38f
-        canvas.drawText(nowText, size / 2f, nowCenterY - (fmNow.ascent + fmNow.descent) / 2f, nowPaint)
+        val box = android.graphics.Rect()
+        fun measure(p: Paint, t: String): Pair<Float, Float> {
+            p.getTextBounds(t, 0, t.length, box)
+            return p.measureText(t) to box.height().toFloat()
+        }
+        // 只受两条上限约束：宽度 96% 内、高度 86% 内。谁先到顶听谁的。
+        val roomW = size * 0.96f
+        val roomH = size * 0.86f
+        val (wNow, hNow) = measure(nowPaint, nowText)
+        if (wNow > roomW) nowPaint.textSize *= roomW / wNow
+        val hAfterW = measure(nowPaint, nowText).second
+        if (hAfterW > roomH) nowPaint.textSize *= roomH / hAfterW
 
-        // 第二行：今日高低温
-        val rangePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = normal
-            textAlign = Paint.Align.CENTER
-            textSize = size * 0.155f
-        }
-        val fmRange = rangePaint.fontMetrics
-        val rangeCenterY = size * 0.72f
+        // 基线按紧边界算：让字形本身落在格子正中，而不是让行距框居中。
+        nowPaint.getTextBounds(nowText, 0, nowText.length, box)
         canvas.drawText(
-            "${w.tempMin}° ${w.tempMax}°",
-            size / 2f,
-            rangeCenterY - (fmRange.ascent + fmRange.descent) / 2f,
-            rangePaint,
+            nowText,
+            cx,
+            cy - (box.top + box.bottom) / 2f,
+            nowPaint,
         )
 
         return bmp
+    }
+
+    companion object {
+        /**
+         * 系统给图标的方框，实测 96px。
+         *
+         * 不是 dp、也不能靠密度换算——它就钉死在这个像素数上，
+         * 所以位图直接按 96 画，别画大再缩。
+         *
+         * 公开给 [RangeTileService] 用：两个按钮的图标框是同一个大小，
+         * 各写一个 96 迟早会分叉。
+         */
+        const val TILE_ICON_PX = 96
     }
 }

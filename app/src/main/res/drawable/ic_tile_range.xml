@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  高低温按钮在「编辑」列表里的小图标：一支竖着的温度计 + 上下两个箭头。
+
+  为什么要单独做一个，而不是复用天气那个太阳：两个按钮都跟天气有关，
+  太阳放在一起会分不清谁是谁。这里靠形状区分——温度计管「温度区间」，
+  「编辑」列表里显示的也是这个白色剪影。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 温度计管身 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11,3.2a2,2 0 0,1 2,2v8.1a3.6,3.6 0 1,1 -4,0V5.2a2,2 0 0,1 2,-2zM11,5.2v8.6a1.9,1.9 0 1,0 2,0V5.2a1,1 0 0,0 -2,0z" />
+    <!-- 上箭头（最高温） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.4,4.2l2.4,2.9h-4.8z" />
+    <!-- 下箭头（最低温） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.4,12.2l2.4,2.9h-4.8z" />
+</vector>
