@@ -33,11 +33,20 @@ import java.util.TimeZone
  * 所以在 [WeatherSource] 里它是默认值，失效时用户在设置页一键切到
  * 中央气象台或 Open-Meteo，见 [WeatherRepo]。
  *
- * ## 一次请求拿全部
+ * ## 一次请求拿全部？早就不是了
  *
- * `/weather/all` 一次返回实况、15 天预报、23 小时逐时、分钟级降水、
- * 空气质量、生活指数、预警。所以这里只发**一个** HTTP 请求，
- * 不像中央气象台那条路要打好几次（省站表、实况、预报各一次）。
+ * `/weather/all` 一次返回实况、15 天预报、23 小时逐时、空气质量、生活指数、预警。
+ *
+ * **分钟级降水不在里面了**（2026-11 实测：响应里根本没有 `minutely` 这个键，
+ * 但顶层文档和旧代码都以为有）。官方 App 早就把它拆成了独立接口：
+ *
+ *     /wtr-v3/weather/xm/forecast/minutely?latitude=&longitude=&locationKey=
+ *
+ * 必须是这个路径。`/weather/all?minutely=1` 之类的参数一律无效，返回里也不会有。
+ *
+ * 这个拆分我们漏跟了：解析代码写得没错，只是它读的键不存在，永远返回 null，
+ * 于是「约 X 分钟后下雨」从上线起就没出现过。这类 bug 不报错、不崩，
+ * 只是安静地少一个功能——只有拿真数据比对才看得出来。
  */
 object XiaomiWeatherApi {
 
@@ -46,6 +55,18 @@ object XiaomiWeatherApi {
     /** Breezy Weather 里硬编码的那两个常量。改了就要跟着改。 */
     private const val APP_KEY = "weather20151024"
     private const val SIGN = "zUFJoAR2ZVrDy1vF3D07"
+
+    /**
+     * 拿不到真实 locationKey 时兜的默认值。
+     *
+     * 实测服务端只用它做非空校验、真正的定位靠 lat/lon，所以填这个
+     * 温州鹿城的 key 不会让别人看到温州的天气。留着是为了「宁可降水曲线
+     * 稍微不准，也不要在这一步整个失败」——temperature 才是主功能。
+     */
+    private const val DEFAULT_LOCATION_KEY = "weathercn:101210710"
+
+    /** 坐标 → locationKey 的缓存，只在内存里，进程重启后重查一次。 */
+    private val keyCache = HashMap<String, String>()
 
     /**
      * 拉一次完整天气。
@@ -74,13 +95,14 @@ object XiaomiWeatherApi {
         val dayList = mutableListOf<DayPoint>()
         val temps = daily?.optJSONObject("temperature")?.optJSONArray("value")
         val dayCodes = daily?.optJSONObject("weather")?.optJSONArray("value")
+        val dayProbs = daily?.optJSONObject("precipitationProbability")?.optJSONArray("value")
         if (temps != null && temps.length() > 0) {
             runCatching {
                 val d0 = temps.getJSONObject(0)
                 tempMax = Math.round(d0.optString("from").toDoubleOrNull() ?: tempNow.toDouble()).toInt()
                 tempMin = Math.round(d0.optString("to").toDoubleOrNull() ?: tempNow.toDouble()).toInt()
             }
-            dayList += buildDays(temps, dayCodes)
+            dayList += buildDays(temps, dayCodes, dayProbs)
         }
 
         // ---- 逐小时温度曲线 ----
@@ -90,7 +112,12 @@ object XiaomiWeatherApi {
         val aqi = parseAqi(json.optJSONObject("aqi"))
 
         // ---- 分钟级降水 ----
-        val minutely = parseMinutely(json.optJSONObject("minutely"))
+        // 独立接口，不能从上面那个 json 里取（详见类注释）。
+        // 它失败不该让整次刷新失败——温度是主功能，降水是加分项。
+        val locationKey = runCatching { resolveLocationKey(lat, lon) }.getOrDefault("")
+        val minutely = runCatching {
+            fetchMinutely(lat, lon, locationKey.ifBlank { DEFAULT_LOCATION_KEY })
+        }.getOrNull()
 
         // ---- 实况其余要素 ----
         val wind = current.optJSONObject("wind")
@@ -141,10 +168,14 @@ object XiaomiWeatherApi {
 
     // ---------------------------------------------------------------- 解析
 
-    /** 逐日预报。日期接口不给，自己从今天往前推。 */
-    private fun buildDays(temps: JSONArray, codes: JSONArray?): List<DayPoint> {
+    /**
+     * 逐日预报。日期接口不给，自己从今天往前推。
+     *
+     * 降水概率是单独一列（`forecastDaily.precipitationProbability.value`），
+     * 和温度/天气那两列**下标对齐**，所以必须三个数组一起读。
+     */
+    private fun buildDays(temps: JSONArray, codes: JSONArray?, probs: JSONArray?): List<DayPoint> {
         val out = mutableListOf<DayPoint>()
-        val cal = Calendar.getInstance()
         val fmtDate = SimpleDateFormat("M月d日", Locale.CHINA)
         val fmtWeek = SimpleDateFormat("EEE", Locale.CHINA)
         for (i in 0 until minOf(temps.length(), 15)) {
@@ -162,6 +193,8 @@ object XiaomiWeatherApi {
                     text = WeatherCodes.text(dayCode),
                     tempMax = hi,
                     tempMin = lo,
+                    // 接口给的是字符串数组，缺项会被省掉，所以按下标取、取不到就是 null
+                    rainProbability = probs?.optString(i)?.toIntOrNull(),
                 )
             }
         }
@@ -223,14 +256,36 @@ object XiaomiWeatherApi {
     }
 
     /**
-     * 分钟级降水：120 个点，2 分钟一个，共 2 小时。
+     * 分钟级降水：**独立接口**，120 个点、1 分钟一个，共 2 小时。
      *
-     * 注意**不要**直接用接口给的 `shortDescription`：里面 `%d` 是小米 App
-     * 自己往模板里填 `kmNum` 的，直接显示会漏出 `%d` 字样。
-     * 只取结构化的 `value` / `kmNum` / `headIconType`，文案自己拼。
+     * ## 为什么不能从 `/weather/all` 里拿
+     *
+     * 那个响应里已经**没有** `minutely` 键了（2026-11 实测）。
+     * 旧代码一直解析它，永远拿到 null——所以这个功能从来没生效过，
+     * 而且不报错。详见类注释。
+     *
+     * ## 参数
+     *
+     * - `locationKey` **必填**，缺了直接 400（`Param locationKey error`）。
+     *   但实测它**不校验内容**：填一个别的城市的 key、甚至假的 key，
+     *   返回的仍是按 lat/lon 算出来的那份。所以取不到 key 时兜一个默认值，
+     *   不要因为这一步失败就丢掉降水预报。
+     * - 频次比实况高得多（官方大约 1 分钟一更），`pubTime` 会精确到秒。
+     *   我们按 5 分钟刷，够用——这是「未来两小时」的曲线，不是逐秒播报。
+     *
+     * ## 文案不要用接口给的
+     *
+     * `description` 里偶尔带 `%d`（那是小米 App 自己往模板里填 kmNum 的），
+     * 直接显示会漏出占位符。只取结构化的 `value` / `kmNum` / `headIconType`，
+     * 文案由 `MinutelyRain.summary` 自己拼。
      */
-    private fun parseMinutely(o: JSONObject?): MinutelyRain? {
-        val p = o?.optJSONObject("precipitation") ?: return null
+    private fun fetchMinutely(lat: Double, lon: Double, locationKey: String): MinutelyRain? {
+        val json = getJson(
+            "$BASE/weather/xm/forecast/minutely?latitude=$lat&longitude=$lon" +
+                "&locale=zh_cn&isLocated=true&locationKey=$locationKey" +
+                "&appKey=$APP_KEY&sign=$SIGN&isGlobal=false"
+        )
+        val p = json.optJSONObject("precipitation") ?: return null
         val arr = p.optJSONArray("value") ?: return null
         if (arr.length() == 0) return null
         val vals = ArrayList<Float>(arr.length())
@@ -243,6 +298,22 @@ object XiaomiWeatherApi {
             kmAway = p.optString("kmNum").toIntOrNull(),
             pubTime = p.optString("pubTime"),
         )
+    }
+
+    /**
+     * 按坐标反查小米自己的 locationKey（`weathercn:101210710` = 鹿城）。
+     *
+     * 分钟级降水那个接口要求带它。按城市粒度取，一次刷新只需要查一次，
+     * 查到的结果缓存在内存里——同一个城市反复刷新不必重复请求。
+     */
+    private fun resolveLocationKey(lat: Double, lon: Double): String {
+        // 坐标抖一点点（室内定位）就当成同一个城市，别每刷一次都换 key
+        val cacheKey = "%.2f,%.2f".format(lat, lon)
+        keyCache[cacheKey]?.let { return it }
+        val arr = getJsonArray("$BASE/location/city/geo?latitude=$lat&longitude=$lon&locale=zh_cn")
+        val key = arr.optJSONObject(0)?.optString("locationKey").orEmpty()
+        if (key.isNotBlank()) keyCache[cacheKey] = key
+        return key
     }
 
     /**

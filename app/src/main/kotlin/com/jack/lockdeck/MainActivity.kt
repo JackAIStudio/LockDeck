@@ -327,13 +327,41 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                        w.minutely?.let { m ->
+                                        // 降水：两种都要显示，因为它们的用途完全不同。
+                                        // 「正在下/多久后下」来自分钟级雷达外推（2 小时内，准）；
+                                        // 「今日降水概率」是彩云的日概率，只能当参考
+                                        // （实测会出现报了小雨、概率却 0 的情况）。
+                                        w.nextRain?.let { r ->
                                             Spacer(Modifier.height(6.dp))
                                             Text(
-                                                "☔ " + m.summary,
+                                                "☔ " + buildString {
+                                                    append(r.headline)
+                                                    r.lastsMinutes?.let { append("，约 ").append(it).append(" 分钟") }
+                                                    if (!r.nearTerm) append("（预报）")
+                                                },
                                                 fontSize = 11.sp,
-                                                color = if (m.hasRain) MaterialTheme.colorScheme.primary
+                                                color = if (r.minutes == 0) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        w.minutely?.let { m ->
+                                            // 有雨的时候上面那行已经说了；这里只在「没雨」时补一句
+                                            // 2 小时内的结论，免得看起来像没数据。
+                                            if (!m.hasRain && w.nextRain == null) {
+                                                Spacer(Modifier.height(6.dp))
+                                                Text(
+                                                    "☔ 2 小时内无雨",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        }
+                                        w.todayRainProbability?.takeIf { it > 0 }?.let { p ->
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                "今日降水概率 $p%",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
                                     }
@@ -410,6 +438,16 @@ class MainActivity : ComponentActivity() {
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 )
                                                 Text(d.text, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                                // 降水概率只在 >0 时显示：一片 0% 既没信息量又占地方，
+                                                // 而且这一列偶尔和「小雨」自相矛盾，别让它更显眼。
+                                                d.rainProbability?.takeIf { it > 0 }?.let { p ->
+                                                    Text(
+                                                        "💧$p%",
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.width(44.dp),
+                                                    )
+                                                }
                                                 Text("${d.tempMin}° ~ ${d.tempMax}°", fontSize = 11.sp)
                                             }
                                         }
@@ -513,7 +551,9 @@ class MainActivity : ComponentActivity() {
                                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                     Text(
                                         "当前用「${source.label}」。小米是默认源，数值和手机自带天气" +
-                                            "完全一致（本来就是同一个后端），一次请求就能拿到分钟级降水和空气质量。",
+                                            "完全一致（本来就是同一个后端）。降水那块是另一个接口：" +
+                                            "「几分钟后下雨」来自分钟级雷达外推（2 小时内，准），" +
+                                            "「今日降水概率」来自彩云（只当参考，它偶尔和「小雨」对不上）。",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -575,8 +615,9 @@ class MainActivity : ComponentActivity() {
                                     Text("刷新间隔：$interval 分钟", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     Text(
                                         if (source == WeatherSource.XIAOMI) {
-                                            "小米实况约 5 分钟更新一次，分钟级降水约 1 分钟一次；" +
-                                                "5 分钟够跟上，再快也没新数据"
+                                            "小米实况约 5 分钟更新一次，分钟级降水更快（官方约 1 分钟一条）；" +
+                                                "5 分钟够跟上——降水是「未来两小时」的曲线，不是逐秒播报。" +
+                                                "送外卖想随时确认，就在控制中心点一下天气按钮，立刻刷一次。"
                                         } else {
                                             "中央气象台观测站约每 10 分钟更新一次，免费无需 key"
                                         },

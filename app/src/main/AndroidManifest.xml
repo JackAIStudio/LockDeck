@@ -98,7 +98,15 @@
             android:launchMode="singleTask"
             android:theme="@style/Theme.Transparent" />
 
-        <!-- 天气按钮：下拉控制中心直接看温度 -->
+        <!-- 天气按钮：下拉控制中心直接看温度（当前温度 + 今日高低温）→ 点一下刷新。
+
+             第二个 intent-filter 是长按的正规入口。TileService 没有 onLongClick 回调，
+             长按只能靠 SystemUI 发这条 QS_TILE_PREFERENCES 广播，由
+             WeatherTileService.onStartCommand 接住。
+
+             但 HyperOS 3 **不发这条**：长按第三方磁贴直接弹系统「应用信息」页，
+             广播一次都没出现（真机验证，dumpsys package 确认这里注册成功）。
+             留着是给原生 Android 用，别指望它在 MIUI 上生效。 -->
         <service
             android:name=".tile.WeatherTileService"
             android:exported="true"
@@ -107,6 +115,9 @@
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
             </intent-filter>
         </service>
 

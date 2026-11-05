@@ -114,6 +114,9 @@ object DayCodec {
             arr.put(JSONArray().apply {
                 put(it.date); put(it.weekday); put(it.weatherCode); put(it.text)
                 put(it.tempMax); put(it.tempMin)
+                // 第 6 位是后加的降水概率。老缓存里没有这一位，
+                // decode 时按越界处理成 null——不要崩，也不要替它编个 0。
+                put(it.rainProbability ?: JSONObject.NULL)
             })
         }
         return arr.toString()
@@ -126,8 +129,15 @@ object DayCodec {
             (0 until arr.length()).mapNotNull { i ->
                 runCatching {
                     val a = arr.getJSONArray(i)
-                    DayPoint(a.getString(0), a.getString(1), a.getInt(2),
-                        a.getString(3), a.getInt(4), a.getInt(5))
+                    DayPoint(
+                        date = a.getString(0),
+                        weekday = a.getString(1),
+                        weatherCode = a.getInt(2),
+                        text = a.getString(3),
+                        tempMax = a.getInt(4),
+                        tempMin = a.getInt(5),
+                        rainProbability = if (a.length() > 6 && !a.isNull(6)) a.getInt(6) else null,
+                    )
                 }.getOrNull()
             }
         }.getOrDefault(emptyList())

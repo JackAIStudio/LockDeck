@@ -108,7 +108,85 @@ data class Weather(
                 else -> "☁"
             }
         }
+
+    /**
+     * 「接下来会不会下雨」——跑单最该先看到的那一句。
+     *
+     * 分两级，因为两个信息的**可信度和时间尺度完全不同**：
+     *
+     * 1. **未来 2 小时**（[minutely]）：雷达外推，逐分钟，说「约 25 分钟后下雨」
+     *    就是真的快要下了。这条能直接拿来做「现在出不出门」的判断。
+     * 2. **2 小时以外**（[hourly] 里第一个降水时次）：模式预报，只给到整点，
+     *    说「明天 2 点前后有雨」。参考价值有，但别当闹钟。
+     *
+     * 最近的优先。都没有就返回 null——**不编造任何「无雨」以外的说法**。
+     */
+    val nextRain: RainOutlook?
+        get() {
+            val m = minutely
+            if (m != null && m.hasRain) {
+                val start = m.startsInMinutes ?: 0
+                return RainOutlook(
+                    headline = if (start == 0) "正在下雨" else "约 $start 分钟后下雨",
+                    minutes = start,
+                    lastsMinutes = m.lastsMinutes,
+                    nearTerm = true,
+                )
+            }
+            // 2 小时以外的第一场：只认逐小时里明确标成降水的时次
+            val wet = hourly.firstOrNull { it.isWet && it.timeMs > updatedAt } ?: return null
+            val hoursAhead = ((wet.timeMs - updatedAt) / 3_600_000L).toInt()
+            if (hoursAhead <= 2) return null // 两小时内的交给 minutely，别重复说
+
+            // 「2 点前后」这种话必须带日期词，否则晚上 11 点看到「2 点有雨」
+            // 根本分不清是凌晨还是下午。按日历天算，不按「几小时后」：
+            // 23:50 说的「明天 2 点」和 01:00 说的「今天 2 点」是同一个时刻。
+            return RainOutlook(
+                headline = "${dayWordFor(wet.timeMs)}${wet.hour} 点前后有雨",
+                minutes = hoursAhead * 60,
+                lastsMinutes = null,
+                nearTerm = false,
+            )
+        }
+
+    /**
+     * 某个时刻相对 [updatedAt] 该说「今天 / 明天 / 后天」。
+     *
+     * 24 小时的「小时数差」在这里不够用：今天 23:00 与明天 01:00 只差 2 小时，
+     * 但一个是今天、一个是明天。所以比日历天。
+     */
+    private fun dayWordFor(targetMs: Long): String {
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = updatedAt
+        val baseDay = cal.get(java.util.Calendar.DAY_OF_YEAR)
+        cal.timeInMillis = targetMs
+        val targetDay = cal.get(java.util.Calendar.DAY_OF_YEAR)
+        return when (targetDay - baseDay) {
+            0 -> "今天 "
+            1 -> "明天 "
+            else -> ""
+        }
+    }
+
+    /** 今日降水概率，接口不给就是 null（见 [DayPoint.rainProbability] 的说明）。 */
+    val todayRainProbability: Int?
+        get() = daily.firstOrNull()?.rainProbability
 }
+
+/**
+ * 一场雨。见 [Weather.nextRain]。
+ *
+ * @param headline 给人看的一句话（「约 25 分钟后下雨」）
+ * @param minutes 从现在起还有多少分钟
+ * @param lastsMinutes 会下多久，不知道就是 null
+ * @param nearTerm true = 雷达外推的分钟级（可信），false = 模式预报（参考）
+ */
+data class RainOutlook(
+    val headline: String,
+    val minutes: Int,
+    val lastsMinutes: Int?,
+    val nearTerm: Boolean,
+)
 
 /** 天气数据源。用户可以在设置里切换。 */enum class WeatherSource(val label: String, val detail: String) {
     /**
@@ -188,6 +266,15 @@ data class Aqi(
  * 小米给的是 120 个点、单位 mm/h。`values` 里的数字直接就是降水强度，
  * 0 表示没雨。
  *
+ * ## 点是 1 分钟一个，不是 2 分钟
+ *
+ * 这一点是拿真实数据反推出来的，不是猜的：
+ * 宁波某次接口给的文案是「10分钟左右雨渐停，不过25分钟左右还会下雨」，
+ * 而数组恰好是「第 0-5 点有雨、6-21 点无雨、22 点起又有雨」——
+ * 换算成 1 分钟一点就是「6 分钟停、22 分钟又下」，和文案对得上；
+ * 按 2 分钟一点就成了「12 分钟停、44 分钟又下」，差了一倍。
+ * 所以 [MINUTES_PER_POINT] 是 1，不是旧代码里写的 2。
+ *
  * ## 别直接显示源给的 shortDescription
  *
  * 源会返回「正在下雨」「2小时内无降雨」「%d公里外正在下雨」这种模板串，
@@ -203,8 +290,8 @@ data class MinutelyRain(
     val pubTime: String = "",
 ) {
     companion object {
-        /** 小米给的频次：2 分钟一个点，共 120 个 = 2 小时 */
-        const val MINUTES_PER_POINT = 2
+        /** 每个点代表多少分钟。见类注释：实测是 1。 */
+        const val MINUTES_PER_POINT = 1
     }
 
     /** 有没有雨（含「马上就下」）。 */
@@ -261,6 +348,9 @@ data class HourPoint(
 ) {
     /** 是否白天（6:00-18:00），挑图标用 */
     val isDay: Boolean get() = hour in 6..17
+
+    /** 这个时次会不会下（雨/雪/雷），用来找「下一场雨」。 */
+    val isWet: Boolean get() = WeatherCodes.isPrecipitation(weatherCode)
 }
 
 /** 未来某一天。 */
@@ -271,6 +361,15 @@ data class DayPoint(
     val text: String,
     val tempMax: Int,
     val tempMin: Int,
+    /**
+     * 这一天的降水概率（0-100），接口不给我就是 null。
+     *
+     * 小米给的这一列是**彩云**算的（看 `sourceMaps.daily.preciProbability`），
+     * 不是中国天气网那套。实测它跟「会不会下雨」并不总是一致：
+     * 长沙 11/7 报小雨、这一列却给 0。所以它只能当参考，
+     * 不能拿来判断「今天下不下」——那件事用 [weatherCode] 和分钟级降水判断。
+     */
+    val rainProbability: Int? = null,
 )
 
 /**
